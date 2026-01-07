@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { hasSupabaseConfig, supabase } from '../lib/supabase';
+import { getSupabaseClient, hasSupabaseConfig } from '../lib/supabase';
 import type { DateRange, Filters, UsageEvent } from '../types';
 
 const SELECT_FIELDS = [
@@ -58,7 +58,8 @@ export const useUsageEvents = (range: DateRange, filters: Filters, enabled = tru
   const [truncated, setTruncated] = useState(false);
 
   useEffect(() => {
-    if (!enabled || !hasSupabaseConfig || !range.start || !range.end) return;
+    const client = getSupabaseClient();
+    if (!enabled || !hasSupabaseConfig || !client || !range.start || !range.end) return;
     let cancelled = false;
 
     const fetchEvents = async () => {
@@ -73,7 +74,7 @@ export const useUsageEvents = (range: DateRange, filters: Filters, enabled = tru
       const all: UsageEvent[] = [];
 
       while (true) {
-        let query = supabase
+        let query = client
           .from('usage_events')
           .select(SELECT_FIELDS)
           .gte('event_ts', startIso)
@@ -88,7 +89,7 @@ export const useUsageEvents = (range: DateRange, filters: Filters, enabled = tru
           setError(queryError.message || 'Failed to load events');
           break;
         }
-        const rows = (data as UsageEvent[]) || [];
+        const rows = ((data ?? []) as unknown) as UsageEvent[];
         all.push(...rows);
 
         if (rows.length < pageSize) break;

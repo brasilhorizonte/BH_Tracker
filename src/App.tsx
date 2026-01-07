@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import Dashboard from './components/Dashboard';
-import { hasSupabaseConfig, supabase } from './lib/supabase';
+import { getSupabaseClient, hasSupabaseConfig } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 
 const AuthView = ({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) => {
@@ -64,17 +64,18 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!hasSupabaseConfig) {
+    const client = getSupabaseClient();
+    if (!hasSupabaseConfig || !client) {
       setLoading(false);
       return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
+    client.auth.getSession().then(({ data }) => {
       setSession(data.session || null);
       setLoading(false);
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
     });
 
@@ -84,15 +85,18 @@ export default function App() {
   }, []);
 
   const handleSignIn = async (email: string, password: string) => {
-    if (!hasSupabaseConfig) return;
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const client = getSupabaseClient();
+    if (!hasSupabaseConfig || !client) return;
+    const { error } = await client.auth.signInWithPassword({ email, password });
     if (error) {
       throw error;
     }
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    const client = getSupabaseClient();
+    if (!client) return;
+    await client.auth.signOut();
   };
 
   if (!hasSupabaseConfig) {
