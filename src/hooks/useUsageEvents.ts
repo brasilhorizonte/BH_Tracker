@@ -25,6 +25,8 @@ const SELECT_FIELDS = [
   'utm_campaign',
   'utm_term',
   'utm_content',
+  'referrer',
+  'landing_page',
   'properties',
 ].join(',');
 
@@ -38,6 +40,7 @@ const applyFilters = (query: any, filters: Filters) => {
   if (filters.plan) query = query.eq('plan', filters.plan);
   if (filters.subscriptionStatus) query = query.eq('subscription_status', filters.subscriptionStatus);
   if (filters.billingPeriod) query = query.eq('billing_period', filters.billingPeriod);
+  if (filters.action) query = query.eq('action', filters.action);
   if (filters.route) query = query.eq('route', filters.route);
   if (filters.section) query = query.eq('section', filters.section);
   if (filters.feature) query = query.eq('feature', filters.feature);
@@ -45,13 +48,22 @@ const applyFilters = (query: any, filters: Filters) => {
   if (filters.deviceType) query = query.eq('device_type', filters.deviceType);
   if (filters.os) query = query.eq('os', filters.os);
   if (filters.browser) query = query.eq('browser', filters.browser);
+  if (filters.referrer) query = query.eq('referrer', filters.referrer);
+  if (filters.landingPage) query = query.eq('landing_page', filters.landingPage);
   if (filters.utmSource) query = query.eq('utm_source', filters.utmSource);
   if (filters.utmMedium) query = query.eq('utm_medium', filters.utmMedium);
   if (filters.utmCampaign) query = query.eq('utm_campaign', filters.utmCampaign);
+  if (filters.utmTerm) query = query.eq('utm_term', filters.utmTerm);
+  if (filters.utmContent) query = query.eq('utm_content', filters.utmContent);
   return query;
 };
 
-export const useUsageEvents = (range: DateRange, filters: Filters, enabled = true) => {
+export const useUsageEvents = (
+  range: DateRange,
+  filters: Filters,
+  enabled = true,
+  refreshKey = 0
+) => {
   const [events, setEvents] = useState<UsageEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +123,7 @@ export const useUsageEvents = (range: DateRange, filters: Filters, enabled = tru
     return () => {
       cancelled = true;
     };
-  }, [range.start, range.end, filters, enabled]);
+  }, [range.start, range.end, filters, enabled, refreshKey]);
 
   return { events, loading, error, truncated };
 };

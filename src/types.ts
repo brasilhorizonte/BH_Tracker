@@ -21,6 +21,8 @@ export type UsageEvent = {
   utm_campaign: string | null;
   utm_term: string | null;
   utm_content: string | null;
+  referrer: string | null;
+  landing_page: string | null;
   properties: Record<string, unknown> | null;
 };
 
@@ -33,6 +35,7 @@ export type Filters = {
   plan: string;
   subscriptionStatus: string;
   billingPeriod: string;
+  action: string;
   route: string;
   section: string;
   feature: string;
@@ -40,9 +43,13 @@ export type Filters = {
   deviceType: string;
   os: string;
   browser: string;
+  referrer: string;
+  landingPage: string;
   utmSource: string;
   utmMedium: string;
   utmCampaign: string;
+  utmTerm: string;
+  utmContent: string;
 };
 
 export type BarDatum = {
