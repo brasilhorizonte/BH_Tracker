@@ -44,7 +44,8 @@ create index if not exists usage_events_properties_gin_idx on public.usage_event
 
 -- Optional helper: admin check backed by profiles table.
 -- Remove this if you already have public.is_admin.
-create or replace function public.is_admin(user_uuid uuid)
+-- Keep default auth.uid() to avoid altering existing signature defaults.
+create or replace function public.is_admin(user_uuid uuid default auth.uid())
 returns boolean
 language sql
 stable
