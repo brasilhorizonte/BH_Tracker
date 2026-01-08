@@ -54,12 +54,32 @@ type DailyBucket = {
   errorEvents: number;
 };
 
+type ExpandedChart = {
+  title: string;
+  subtitle?: string;
+  series: { label: string; value: number }[];
+  accent?: string;
+};
+
 const toDayKey = (date: Date) => date.toISOString().slice(0, 10);
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 
+const CONTENT_EVENT_NAMES = ['report_view', 'report_download', 'content_view', 'content_download'];
+const AI_PRODUCT_DEFS = [
+  { key: 'analysis_run', label: 'Analysis', accent: '#f4a259' },
+  { key: 'validator_run', label: 'Validator', accent: '#5db7a5' },
+  { key: 'qualitativo_run', label: 'Qualitativo', accent: '#f28f79' },
+  { key: 'valuai_run', label: 'ValuAI', accent: '#f2c14e' },
+];
+const AI_PRODUCT_KEYS = new Set(AI_PRODUCT_DEFS.map((item) => item.key));
+const LOGIN_EVENT_NAME = 'login';
+
+const isLoginSuccess = (event: UsageEvent) =>
+  event.event_name === LOGIN_EVENT_NAME && (event.action === 'success' || event.success === true);
+
 const buildDailyBuckets = (events: UsageEvent[], range: DateRange): DailyBucket[] => {
-  const contentEventNames = new Set(['report_view', 'report_download', 'content_view', 'content_download']);
-  const aiEventNames = new Set(['analysis_run', 'validator_run', 'qualitativo_run', 'valuai_run']);
+  const contentEventNames = new Set(CONTENT_EVENT_NAMES);
+  const aiEventNames = AI_PRODUCT_KEYS;
   const map = new Map<string, DailyBucket>();
 
   const ensureBucket = (day: string) => {
@@ -176,6 +196,76 @@ const buildDailySessionDurationSeries = (events: UsageEvent[], range: DateRange)
   return series;
 };
 
+const buildDailyDistinctSeries = (
+  events: UsageEvent[],
+  range: DateRange,
+  predicate: (event: UsageEvent) => boolean
+) => {
+  const dailyMap = new Map<string, Set<string>>();
+  events.forEach((event) => {
+    if (!predicate(event) || !event.user_id) return;
+    const time = new Date(event.event_ts);
+    if (Number.isNaN(time.getTime())) return;
+    const day = toDayKey(time);
+    if (!dailyMap.has(day)) dailyMap.set(day, new Set());
+    dailyMap.get(day)?.add(event.user_id);
+  });
+
+  const start = new Date(`${range.start}T00:00:00.000Z`);
+  const end = new Date(`${range.end}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+
+  const series: { label: string; value: number }[] = [];
+  for (let cursor = start; cursor <= end; cursor = addDays(cursor, 1)) {
+    const day = toDayKey(cursor);
+    series.push({ label: day, value: dailyMap.get(day)?.size ?? 0 });
+  }
+  return series;
+};
+
+const buildAiProductSeries = (
+  events: UsageEvent[],
+  range: DateRange
+): { key: string; label: string; accent: string; total: number; series: { label: string; value: number }[] }[] => {
+  const dailyMap = new Map<string, Record<string, number>>();
+  const totals = new Map<string, number>();
+
+  events.forEach((event) => {
+    if (!AI_PRODUCT_KEYS.has(event.event_name)) return;
+    const time = new Date(event.event_ts);
+    if (Number.isNaN(time.getTime())) return;
+    const day = toDayKey(time);
+    const dayCounts = dailyMap.get(day) ?? {};
+    dayCounts[event.event_name] = (dayCounts[event.event_name] ?? 0) + 1;
+    dailyMap.set(day, dayCounts);
+    totals.set(event.event_name, (totals.get(event.event_name) ?? 0) + 1);
+  });
+
+  const start = new Date(`${range.start}T00:00:00.000Z`);
+  const end = new Date(`${range.end}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return AI_PRODUCT_DEFS.map((item) => ({
+      ...item,
+      total: totals.get(item.key) ?? 0,
+      series: [],
+    }));
+  }
+
+  return AI_PRODUCT_DEFS.map((item) => {
+    const series: { label: string; value: number }[] = [];
+    for (let cursor = start; cursor <= end; cursor = addDays(cursor, 1)) {
+      const day = toDayKey(cursor);
+      const dayCounts = dailyMap.get(day);
+      series.push({ label: day, value: dayCounts ? dayCounts[item.key] ?? 0 : 0 });
+    }
+    return {
+      ...item,
+      total: totals.get(item.key) ?? 0,
+      series,
+    };
+  });
+};
+
 const getUniqueValues = (events: UsageEvent[], key: keyof UsageEvent) => {
   const set = new Set<string>();
   events.forEach((event) => {
@@ -193,14 +283,17 @@ const LineChart = ({
   data,
   accent = '#f4a259',
   showLabels = true,
+  onExpand,
 }: {
   data: { label: string; value: number }[];
   accent?: string;
   showLabels?: boolean;
+  onExpand?: () => void;
 }) => {
   if (!data.length) {
     return <div className="chart-wrap">No data in range</div>;
   }
+  const isClickable = Boolean(onExpand);
   const values = data.map((d) => d.value);
   const max = Math.max(...values, 1);
   const points = data.map((d, index) => {
@@ -211,7 +304,22 @@ const LineChart = ({
   const path = points.join(' ');
 
   return (
-    <div className={`chart-wrap${showLabels ? '' : ' chart-compact'}`}>
+    <div
+      className={`chart-wrap${showLabels ? '' : ' chart-compact'}${isClickable ? ' chart-clickable' : ''}`}
+      onClick={onExpand}
+      onKeyDown={
+        isClickable
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onExpand?.();
+              }
+            }
+          : undefined
+      }
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+    >
       <svg className="line-chart" viewBox="0 0 100 100" preserveAspectRatio="none">
         <polyline
           fill="none"
@@ -264,12 +372,14 @@ const MetricCard = ({
   hint,
   series,
   accent,
+  onExpand,
 }: {
   label: string;
   value: string;
   hint?: string;
   series: { label: string; value: number }[];
   accent?: string;
+  onExpand?: (chart: ExpandedChart) => void;
 }) => (
   <div className="metric-card">
     <div className="metric-header">
@@ -279,7 +389,22 @@ const MetricCard = ({
         {hint ? <div className="metric-hint">{hint}</div> : null}
       </div>
     </div>
-    <LineChart data={series} accent={accent} showLabels={false} />
+    <LineChart
+      data={series}
+      accent={accent}
+      showLabels={false}
+      onExpand={
+        onExpand
+          ? () =>
+              onExpand({
+                title: label,
+                subtitle: hint,
+                series,
+                accent,
+              })
+          : undefined
+      }
+    />
   </div>
 );
 
@@ -565,6 +690,7 @@ export default function Dashboard() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const wasLoading = useRef(false);
+  const [expandedChart, setExpandedChart] = useState<ExpandedChart | null>(null);
 
   const { events, loading, error, truncated } = useUsageEvents(range, filters, true, refreshTick);
 
@@ -574,6 +700,15 @@ export default function Dashboard() {
     }
     wasLoading.current = loading;
   }, [loading, error]);
+
+  useEffect(() => {
+    if (!expandedChart) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpandedChart(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [expandedChart]);
 
   const dailyBuckets = useMemo(() => buildDailyBuckets(events, range), [events, range]);
   const dailyUsersSeries = useMemo(() => buildSeries(dailyBuckets, (b) => b.users.size), [dailyBuckets]);
@@ -629,6 +764,11 @@ export default function Dashboard() {
     () => buildDailySessionDurationSeries(events, range),
     [events, range]
   );
+  const dailyLoginUsersSeries = useMemo(
+    () => buildDailyDistinctSeries(events, range, isLoginSuccess),
+    [events, range]
+  );
+  const aiProductSeries = useMemo(() => buildAiProductSeries(events, range), [events, range]);
 
   const endDate = useMemo(() => new Date(`${range.end}T23:59:59.999Z`), [range.end]);
   const rangeStartDate = useMemo(() => new Date(`${range.start}T00:00:00.000Z`), [range.start]);
@@ -645,6 +785,9 @@ export default function Dashboard() {
   const wau = distinctCount(filterByDateRange(events, last7Start, endDate), 'user_id');
   const mau = distinctCount(filterByDateRange(events, last30Start, endDate), 'user_id');
   const totalUsers = distinctCount(events, 'user_id');
+  const loginEvents = useMemo(() => events.filter((event) => event.event_name === LOGIN_EVENT_NAME), [events]);
+  const loginSuccessEvents = useMemo(() => loginEvents.filter(isLoginSuccess), [loginEvents]);
+  const loginUsers = distinctCount(loginSuccessEvents, 'user_id');
 
   const sessionStats = computeSessionStats(events);
   const totalSessions = sessionStats.sessionCount;
@@ -678,12 +821,8 @@ export default function Dashboard() {
   const landingPages = buildBarList(events, 'landing_page', 5);
   const errorCodes = extractTopProperty(events, 'error_code', 5);
 
-  const contentEvents = events.filter((event) =>
-    ['report_view', 'report_download', 'content_view', 'content_download'].includes(event.event_name)
-  );
-  const aiEvents = events.filter((event) =>
-    ['analysis_run', 'validator_run', 'qualitativo_run', 'valuai_run'].includes(event.event_name)
-  );
+  const contentEvents = events.filter((event) => CONTENT_EVENT_NAMES.includes(event.event_name));
+  const aiEvents = events.filter((event) => AI_PRODUCT_KEYS.has(event.event_name));
 
   const aiSuccessRate = computeSuccessRate(aiEvents).successRate;
   const aiShare = safeDivide(aiEvents.length, events.length);
@@ -717,6 +856,7 @@ export default function Dashboard() {
   );
 
   const rangeLabel = `${range.start} to ${range.end}`;
+  const openChart = (chart: ExpandedChart) => setExpandedChart(chart);
 
   return (
     <div className="app-content">
@@ -732,7 +872,16 @@ export default function Dashboard() {
           </div>
           <div className="hero-card">
             <div className="section-subtitle">Daily actives</div>
-            <LineChart data={dailyUsersSeries} />
+            <LineChart
+              data={dailyUsersSeries}
+              onExpand={() =>
+                openChart({
+                  title: 'Daily actives',
+                  subtitle: rangeLabel,
+                  series: dailyUsersSeries,
+                })
+              }
+            />
           </div>
         </div>
 
@@ -759,13 +908,20 @@ export default function Dashboard() {
           <div className="section-title">Activity trends</div>
           <div className="section-subtitle">DAU, WAU, MAU, sessions and event volume</div>
           <div className="metric-grid">
-            <MetricCard label="DAU (Daily Active Users)" value={formatNumber(dau)} hint="Last day" series={dailyUsersSeries} />
+            <MetricCard
+              label="DAU (Daily Active Users)"
+              value={formatNumber(dau)}
+              hint="Last day"
+              series={dailyUsersSeries}
+              onExpand={openChart}
+            />
             <MetricCard
               label="WAU (7d rolling users)"
               value={formatNumber(wau)}
               hint={wauPartial ? 'Trailing 7 days (partial)' : 'Trailing 7 days'}
               series={rollingWauSeries}
               accent="#5db7a5"
+              onExpand={openChart}
             />
             <MetricCard
               label="MAU (30d rolling users)"
@@ -773,6 +929,7 @@ export default function Dashboard() {
               hint={mauPartial ? 'Trailing 30 days (partial)' : 'Trailing 30 days'}
               series={rollingMauSeries}
               accent="#f28f79"
+              onExpand={openChart}
             />
             <MetricCard
               label="Sessions"
@@ -780,6 +937,15 @@ export default function Dashboard() {
               hint={`Per user: ${sessionsPerUser.toFixed(2)}`}
               series={dailySessionsSeries}
               accent="#5db7a5"
+              onExpand={openChart}
+            />
+            <MetricCard
+              label="Login users"
+              value={formatNumber(loginUsers)}
+              hint="Unique users with login success"
+              series={dailyLoginUsersSeries}
+              accent="#f2c14e"
+              onExpand={openChart}
             />
             <MetricCard
               label="Avg session duration"
@@ -787,14 +953,22 @@ export default function Dashboard() {
               hint="Based on session_id"
               series={dailySessionDurationSeries}
               accent="#f4a259"
+              onExpand={openChart}
             />
-            <MetricCard label="Events" value={formatNumber(events.length)} hint="All events" series={dailyEventsSeries} />
+            <MetricCard
+              label="Events"
+              value={formatNumber(events.length)}
+              hint="All events"
+              series={dailyEventsSeries}
+              onExpand={openChart}
+            />
             <MetricCard
               label="Events/User"
               value={eventsPerUser.toFixed(2)}
               hint="Average per user"
               series={dailyEventsPerUserSeries}
               accent="#f28f79"
+              onExpand={openChart}
             />
             <MetricCard
               label="Sessions/User"
@@ -802,6 +976,7 @@ export default function Dashboard() {
               hint="Average per user"
               series={dailySessionsPerUserSeries}
               accent="#5db7a5"
+              onExpand={openChart}
             />
             <MetricCard
               label="Events/Session"
@@ -809,6 +984,7 @@ export default function Dashboard() {
               hint="Average per session"
               series={dailyEventsPerSessionSeries}
               accent="#f4a259"
+              onExpand={openChart}
             />
           </div>
         </div>
@@ -823,6 +999,7 @@ export default function Dashboard() {
               hint="All events"
               series={dailySuccessRateSeries}
               accent="#5db7a5"
+              onExpand={openChart}
             />
             <MetricCard
               label="Error rate"
@@ -830,6 +1007,7 @@ export default function Dashboard() {
               hint="All events"
               series={dailyErrorRateSeries}
               accent="#f28f79"
+              onExpand={openChart}
             />
             <MetricCard
               label="Avg latency (ms)"
@@ -837,6 +1015,7 @@ export default function Dashboard() {
               hint="From latency_ms"
               series={dailyLatencySeries}
               accent="#f4a259"
+              onExpand={openChart}
             />
             <MetricCard
               label="Paywall rate"
@@ -844,6 +1023,7 @@ export default function Dashboard() {
               hint="paywall_block / events"
               series={dailyPaywallRateSeries}
               accent="#f28f79"
+              onExpand={openChart}
             />
             <MetricCard
               label="Anon share"
@@ -851,6 +1031,7 @@ export default function Dashboard() {
               hint="anon_id events / total"
               series={dailyAnonShareSeries}
               accent="#5db7a5"
+              onExpand={openChart}
             />
           </div>
         </div>
@@ -864,6 +1045,7 @@ export default function Dashboard() {
               value={formatNumber(contentEvents.length)}
               hint="Reports + content"
               series={dailyContentEventsSeries}
+              onExpand={openChart}
             />
             <MetricCard
               label="AI events"
@@ -871,6 +1053,7 @@ export default function Dashboard() {
               hint="analysis_run + validator_run"
               series={dailyAiEventsSeries}
               accent="#5db7a5"
+              onExpand={openChart}
             />
             <MetricCard
               label="Content share"
@@ -878,6 +1061,7 @@ export default function Dashboard() {
               hint="content / all events"
               series={dailyContentShareSeries}
               accent="#f4a259"
+              onExpand={openChart}
             />
             <MetricCard
               label="AI share"
@@ -885,6 +1069,7 @@ export default function Dashboard() {
               hint="AI / all events"
               series={dailyAiShareSeries}
               accent="#5db7a5"
+              onExpand={openChart}
             />
             <MetricCard
               label="Paywall blocks"
@@ -892,7 +1077,29 @@ export default function Dashboard() {
               hint="Event count"
               series={dailyPaywallSeries}
               accent="#f28f79"
+              onExpand={openChart}
             />
+          </div>
+        </div>
+
+        <div className="section-card" style={{ marginTop: '20px' }}>
+          <div className="section-title">AI product trends</div>
+          <div className="section-subtitle">One chart per AI module</div>
+          <div className="metric-grid">
+            {aiProductSeries.map((product) => {
+              const share = safeDivide(product.total, aiEvents.length);
+              return (
+                <MetricCard
+                  key={product.key}
+                  label={product.label}
+                  value={formatNumber(product.total)}
+                  hint={`event_name: ${product.key} | AI share: ${formatPercent(share)}`}
+                  series={product.series}
+                  accent={product.accent}
+                  onExpand={openChart}
+                />
+              );
+            })}
           </div>
         </div>
 
@@ -1009,7 +1216,19 @@ export default function Dashboard() {
                 </tr>
               </tbody>
             </table>
-            <LineChart data={dailyContentEventsSeries} accent="#f4a259" showLabels={false} />
+            <LineChart
+              data={dailyContentEventsSeries}
+              accent="#f4a259"
+              showLabels={false}
+              onExpand={() =>
+                openChart({
+                  title: 'Content events',
+                  subtitle: rangeLabel,
+                  series: dailyContentEventsSeries,
+                  accent: '#f4a259',
+                })
+              }
+            />
           </div>
           <div className="section-card">
             <div className="section-title">AI modules</div>
@@ -1030,7 +1249,19 @@ export default function Dashboard() {
                 </tr>
               </tbody>
             </table>
-            <LineChart data={dailyAiEventsSeries} accent="#5db7a5" showLabels={false} />
+            <LineChart
+              data={dailyAiEventsSeries}
+              accent="#5db7a5"
+              showLabels={false}
+              onExpand={() =>
+                openChart({
+                  title: 'AI events',
+                  subtitle: rangeLabel,
+                  series: dailyAiEventsSeries,
+                  accent: '#5db7a5',
+                })
+              }
+            />
             {aiTopModules.length ? (
               <div style={{ marginTop: '12px' }}>
                 <div className="section-subtitle">Top modules</div>
@@ -1119,6 +1350,23 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      {expandedChart ? (
+        <div className="chart-modal" role="dialog" aria-modal="true" onClick={() => setExpandedChart(null)}>
+          <div className="chart-modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="chart-modal-header">
+              <div>
+                <div className="section-title">{expandedChart.title}</div>
+                <div className="chart-modal-meta">{expandedChart.subtitle || rangeLabel}</div>
+              </div>
+              <button className="button" type="button" onClick={() => setExpandedChart(null)}>
+                Close
+              </button>
+            </div>
+            <LineChart data={expandedChart.series} accent={expandedChart.accent} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
