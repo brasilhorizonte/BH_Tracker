@@ -155,7 +155,7 @@ button, input, select {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
+  grid-template-columns: minmax(260px, 0.7fr) minmax(360px, 1.3fr);
   gap: 24px;
   margin-bottom: 28px;
 }
@@ -167,6 +167,10 @@ button, input, select {
   padding: 28px;
   box-shadow: var(--shadow);
   animation: fadeUp 0.6s ease;
+}
+
+.hero-chart .line-chart {
+  height: 260px;
 }
 
 .hero-title {

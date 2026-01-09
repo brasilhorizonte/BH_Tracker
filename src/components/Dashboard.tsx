@@ -870,7 +870,7 @@ export default function Dashboard() {
               <span className="meta-pill">{rangeLabel}</span>
             </div>
           </div>
-          <div className="hero-card">
+          <div className="hero-card hero-chart">
             <div className="section-subtitle">Daily actives</div>
             <LineChart
               data={dailyUsersSeries}
