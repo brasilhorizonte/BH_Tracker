@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent, TouchEvent } from 'react';
 import { useUsageEvents } from '../hooks/useUsageEvents';
 import {
   buildBarList,
@@ -10,6 +11,7 @@ import {
   extractTopProperty,
   filterByDateRange,
 } from '../lib/metrics';
+import { EMPTY_FILTER_VALUE } from '../types';
 import type { BarDatum, DateRange, Filters, UsageEvent } from '../types';
 
 const formatNumber = (value: number) =>
@@ -17,6 +19,8 @@ const formatNumber = (value: number) =>
 
 const formatPercent = (value: number | null) =>
   value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+
+const formatDecimal = (value: number) => value.toFixed(2);
 
 const formatDuration = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
@@ -31,11 +35,14 @@ const formatTimestamp = (value: Date | null) => {
   return value.toLocaleString();
 };
 
+const formatFilterValue = (value: string) => (value === EMPTY_FILTER_VALUE ? 'Not set' : value);
+
+const toDateKey = (date: Date) => date.toISOString().slice(0, 10);
+
 const getDefaultRange = (): DateRange => {
   const end = new Date();
   const start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
-  const toKey = (date: Date) => date.toISOString().slice(0, 10);
-  return { start: toKey(start), end: toKey(end) };
+  return { start: toDateKey(start), end: toDateKey(end) };
 };
 
 type DailyBucket = {
@@ -59,27 +66,78 @@ type ExpandedChart = {
   subtitle?: string;
   series: { label: string; value: number }[];
   accent?: string;
+  formatValue?: (value: number) => string;
 };
 
-const toDayKey = (date: Date) => date.toISOString().slice(0, 10);
+type FocusPoint = {
+  label: string;
+  value: number;
+  formattedValue: string;
+  metricLabel: string;
+  accent?: string;
+};
+
+type InsightItem = {
+  title: string;
+  value: string;
+  caption: string;
+  day?: string;
+  accent?: string;
+};
+
+const toDayKey = toDateKey;
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const buildPresetRange = (days: number): DateRange => {
+  const end = new Date();
+  const start = new Date(end.getTime() - (days - 1) * DAY_MS);
+  return { start: toDateKey(start), end: toDateKey(end) };
+};
 
 const CONTENT_EVENT_NAMES = ['report_view', 'report_download', 'content_view', 'content_download'];
-const AI_PRODUCT_DEFS = [
+const AI_MODULE_DEFS = [
   { key: 'analysis_run', label: 'Analysis', accent: '#f4a259' },
   { key: 'validator_run', label: 'Validator', accent: '#5db7a5' },
   { key: 'qualitativo_run', label: 'Qualitativo', accent: '#f28f79' },
   { key: 'valuai_run', label: 'ValuAI', accent: '#f2c14e' },
 ];
-const AI_PRODUCT_KEYS = new Set(AI_PRODUCT_DEFS.map((item) => item.key));
+const AI_MODULE_KEYS = new Set(AI_MODULE_DEFS.map((item) => item.key));
+const AI_FEATURE_ALIASES: Record<string, string> = {
+  validador: 'validador',
+  validador_ai: 'validador',
+  qualitativo: 'qualitativo',
+  qualitativo_ai: 'qualitativo',
+  valuai: 'valuai',
+  valuai_ai: 'valuai',
+};
 const LOGIN_EVENT_NAME = 'login';
+
+const normalizeAiFeature = (feature: string | null) => {
+  if (!feature) return null;
+  const normalized = feature.trim().toLowerCase();
+  return AI_FEATURE_ALIASES[normalized] ?? normalized;
+};
+
+const getAiModuleKey = (event: UsageEvent) => {
+  if (event.event_name === 'analysis_run') {
+    const feature = normalizeAiFeature(event.feature);
+    if (feature === 'qualitativo') return 'qualitativo_run';
+    if (feature === 'valuai') return 'valuai_run';
+    if (feature === 'validador') return 'analysis_run';
+    return 'analysis_run';
+  }
+  if (AI_MODULE_KEYS.has(event.event_name)) return event.event_name;
+  return null;
+};
+
+const isAiEvent = (event: UsageEvent) => getAiModuleKey(event) !== null;
 
 const isLoginSuccess = (event: UsageEvent) =>
   event.event_name === LOGIN_EVENT_NAME && (event.action === 'success' || event.success === true);
 
 const buildDailyBuckets = (events: UsageEvent[], range: DateRange): DailyBucket[] => {
   const contentEventNames = new Set(CONTENT_EVENT_NAMES);
-  const aiEventNames = AI_PRODUCT_KEYS;
   const map = new Map<string, DailyBucket>();
 
   const ensureBucket = (day: string) => {
@@ -118,7 +176,7 @@ const buildDailyBuckets = (events: UsageEvent[], range: DateRange): DailyBucket[
     }
     if (!event.user_id && event.anon_id) bucket.anonEvents += 1;
     if (contentEventNames.has(event.event_name)) bucket.contentEvents += 1;
-    if (aiEventNames.has(event.event_name)) bucket.aiEvents += 1;
+    if (isAiEvent(event)) bucket.aiEvents += 1;
     if (event.event_name === 'paywall_block') bucket.paywallEvents += 1;
     const properties = event.properties as Record<string, unknown> | null;
     if (properties && typeof properties.latency_ms === 'number' && Number.isFinite(properties.latency_ms)) {
@@ -156,6 +214,56 @@ const buildRollingUsersSeries = (buckets: DailyBucket[], windowDays: number) => 
 };
 
 const safeDivide = (value: number, divider: number) => (divider > 0 ? value / divider : 0);
+const computeDelta = (current: number, previous: number) => (previous > 0 ? (current - previous) / previous : null);
+const computeRate = (count: number, total: number) => (total > 0 ? count / total : null);
+
+const formatDeltaPercent = (delta: number | null) =>
+  delta === null || !Number.isFinite(delta) ? 'n/a' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`;
+
+const formatDeltaPoints = (delta: number | null) =>
+  delta === null || !Number.isFinite(delta) ? 'n/a' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}pp`;
+
+const formatSignedNumber = (value: number) => `${value >= 0 ? '+' : '-'}${formatNumber(Math.abs(value))}`;
+
+const findPeak = (buckets: DailyBucket[], accessor: (bucket: DailyBucket) => number) => {
+  let best: { day: string; value: number } | null = null;
+  buckets.forEach((bucket) => {
+    const value = accessor(bucket);
+    if (!Number.isFinite(value)) return;
+    if (!best || value > best.value) {
+      best = { day: bucket.day, value };
+    }
+  });
+  return best;
+};
+
+const findChangeExtremes = (series: { label: string; value: number }[]) => {
+  let increase: { day: string; value: number } | null = null;
+  let decrease: { day: string; value: number } | null = null;
+  for (let i = 1; i < series.length; i += 1) {
+    const delta = series[i].value - series[i - 1].value;
+    if (!increase || delta > increase.value) increase = { day: series[i].label, value: delta };
+    if (!decrease || delta < decrease.value) decrease = { day: series[i].label, value: delta };
+  }
+  return { increase, decrease };
+};
+
+const computeSeriesStats = (series: { label: string; value: number }[]) => {
+  if (!series.length) return null;
+  let min = series[0];
+  let max = series[0];
+  let total = 0;
+  series.forEach((point) => {
+    if (point.value < min.value) min = point;
+    if (point.value > max.value) max = point;
+    total += point.value;
+  });
+  return {
+    min,
+    max,
+    avg: total / series.length,
+  };
+};
 
 const buildDailySessionDurationSeries = (events: UsageEvent[], range: DateRange) => {
   const sessions = new Map<string, { start: number; end: number }>();
@@ -231,27 +339,28 @@ const buildAiProductSeries = (
   const totals = new Map<string, number>();
 
   events.forEach((event) => {
-    if (!AI_PRODUCT_KEYS.has(event.event_name)) return;
+    const moduleKey = getAiModuleKey(event);
+    if (!moduleKey) return;
     const time = new Date(event.event_ts);
     if (Number.isNaN(time.getTime())) return;
     const day = toDayKey(time);
     const dayCounts = dailyMap.get(day) ?? {};
-    dayCounts[event.event_name] = (dayCounts[event.event_name] ?? 0) + 1;
+    dayCounts[moduleKey] = (dayCounts[moduleKey] ?? 0) + 1;
     dailyMap.set(day, dayCounts);
-    totals.set(event.event_name, (totals.get(event.event_name) ?? 0) + 1);
+    totals.set(moduleKey, (totals.get(moduleKey) ?? 0) + 1);
   });
 
   const start = new Date(`${range.start}T00:00:00.000Z`);
   const end = new Date(`${range.end}T00:00:00.000Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return AI_PRODUCT_DEFS.map((item) => ({
+    return AI_MODULE_DEFS.map((item) => ({
       ...item,
       total: totals.get(item.key) ?? 0,
       series: [],
     }));
   }
 
-  return AI_PRODUCT_DEFS.map((item) => {
+  return AI_MODULE_DEFS.map((item) => {
     const series: { label: string; value: number }[] = [];
     for (let cursor = start; cursor <= end; cursor = addDays(cursor, 1)) {
       const day = toDayKey(cursor);
@@ -268,45 +377,85 @@ const buildAiProductSeries = (
 
 const getUniqueValues = (events: UsageEvent[], key: keyof UsageEvent) => {
   const set = new Set<string>();
+  let hasEmpty = false;
   events.forEach((event) => {
     const value = event[key];
-    if (typeof value === 'string' && value.trim()) set.add(value);
+    if (typeof value === 'string' && value.trim()) {
+      set.add(value);
+    } else if (value == null) {
+      hasEmpty = true;
+    }
   });
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+  const values = Array.from(set).sort((a, b) => a.localeCompare(b));
+  if (hasEmpty) values.unshift(EMPTY_FILTER_VALUE);
+  return values;
 };
 
 const buildEventOptions = (events: UsageEvent[]) => getUniqueValues(events, 'event_name');
 
-const buildFilterLabel = (value: string) => (value ? value : 'All');
+const buildFilterLabel = (value: string) => (value ? formatFilterValue(value) : 'All');
 
 const LineChart = ({
   data,
   accent = '#f4a259',
   showLabels = true,
   onExpand,
+  onFocus,
+  formatValue,
 }: {
   data: { label: string; value: number }[];
   accent?: string;
   showLabels?: boolean;
   onExpand?: () => void;
+  onFocus?: (point: { label: string; value: number } | null) => void;
+  formatValue?: (value: number) => string;
 }) => {
   if (!data.length) {
     return <div className="chart-wrap">No data in range</div>;
   }
   const isClickable = Boolean(onExpand);
+  const formatChartValue = formatValue ?? formatNumber;
   const values = data.map((d) => d.value);
   const max = Math.max(...values, 1);
-  const points = data.map((d, index) => {
+  const coords = data.map((d, index) => {
     const x = (index / Math.max(1, data.length - 1)) * 100;
     const y = 100 - (d.value / max) * 100;
-    return `${x},${y}`;
+    return { x, y };
   });
-  const path = points.join(' ');
+  const path = coords.map((point) => `${point.x},${point.y}`).join(' ');
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
+  const setActivePoint = (index: number | null, notify = true) => {
+    setActiveIndex(index);
+    if (notify) onFocus?.(index === null ? null : data[index]);
+  };
+
+  const handleMove = (event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clientX = 'touches' in event ? event.touches[0]?.clientX : event.clientX;
+    if (clientX === undefined) return;
+    const percent = (clientX - rect.left) / rect.width;
+    const clamped = Math.min(Math.max(percent, 0), 1);
+    const index = Math.round(clamped * (data.length - 1));
+    if (index !== activeIndex) {
+      setActivePoint(index);
+    }
+  };
+
+  const handleLeave = () => setActivePoint(null, false);
+
+  const activePoint = activeIndex === null ? null : coords[activeIndex];
+  const activeDatum = activeIndex === null ? null : data[activeIndex];
 
   return (
     <div
       className={`chart-wrap${showLabels ? '' : ' chart-compact'}${isClickable ? ' chart-clickable' : ''}`}
       onClick={onExpand}
+      onMouseMove={handleMove}
+      onMouseLeave={handleLeave}
+      onTouchStart={handleMove}
+      onTouchMove={handleMove}
+      onTouchEnd={handleLeave}
       onKeyDown={
         isClickable
           ? (event) => {
@@ -335,7 +484,19 @@ const LineChart = ({
           strokeLinecap="round"
           points={path}
         />
+        {activePoint ? (
+          <>
+            <line className="chart-guide" x1={activePoint.x} y1="0" x2={activePoint.x} y2="100" />
+            <circle className="chart-dot" cx={activePoint.x} cy={activePoint.y} r="2.8" fill={accent} />
+          </>
+        ) : null}
       </svg>
+      {activePoint && activeDatum ? (
+        <div className="chart-tooltip" style={{ left: `${activePoint.x}%` }}>
+          <div className="chart-tooltip-value">{formatChartValue(activeDatum.value)}</div>
+          <div className="chart-tooltip-label">{activeDatum.label}</div>
+        </div>
+      ) : null}
       {showLabels ? (
         <div className="hero-metadata" style={{ marginTop: '8px' }}>
           <span className="meta-pill">{data[0]?.label}</span>
@@ -346,22 +507,59 @@ const LineChart = ({
   );
 };
 
-const BarList = ({ title, data }: { title: string; data: BarDatum[] }) => {
+const BarList = ({
+  title,
+  data,
+  onSelect,
+  activeValue,
+  filterLabel,
+}: {
+  title: string;
+  data: BarDatum[];
+  onSelect?: (value: string) => void;
+  activeValue?: string;
+  filterLabel?: string;
+}) => {
   const max = Math.max(...data.map((d) => d.value), 1);
   return (
     <div className="section-card">
       <div className="section-subtitle">{title}</div>
       <div className="bar-list">
-        {data.map((item) => (
-          <div key={item.label} className="bar-item">
-            <div>{item.label}</div>
-            <div className="bar-track">
-              <div className="bar-fill" style={{ width: `${(item.value / max) * 100}%` }} />
+        {data.map((item) => {
+          const valueKey = item.key ?? item.label;
+          const isActive = activeValue === valueKey;
+          const isInteractive = Boolean(onSelect);
+          if (isInteractive) {
+            return (
+              <button
+                key={valueKey}
+                className={`bar-item bar-item-button${isActive ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => onSelect?.(valueKey)}
+                aria-pressed={isActive}
+              >
+                <div title={item.label}>{item.label}</div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(item.value / max) * 100}%` }} />
+                </div>
+                <div>{formatNumber(item.value)}</div>
+              </button>
+            );
+          }
+          return (
+            <div key={valueKey} className="bar-item">
+              <div title={item.label}>{item.label}</div>
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${(item.value / max) * 100}%` }} />
+              </div>
+              <div>{formatNumber(item.value)}</div>
             </div>
-            <div>{formatNumber(item.value)}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+      {onSelect ? (
+        <div className="bar-hint">Click a row to filter by {filterLabel ?? 'this segment'}.</div>
+      ) : null}
     </div>
   );
 };
@@ -373,6 +571,8 @@ const MetricCard = ({
   series,
   accent,
   onExpand,
+  onFocus,
+  formatValue,
 }: {
   label: string;
   value: string;
@@ -380,6 +580,8 @@ const MetricCard = ({
   series: { label: string; value: number }[];
   accent?: string;
   onExpand?: (chart: ExpandedChart) => void;
+  onFocus?: (point: FocusPoint | null) => void;
+  formatValue?: (value: number) => string;
 }) => (
   <div className="metric-card">
     <div className="metric-header">
@@ -388,25 +590,97 @@ const MetricCard = ({
         <div className="metric-value">{value}</div>
         {hint ? <div className="metric-hint">{hint}</div> : null}
       </div>
+      {onExpand ? (
+        <button
+          className="button button-ghost button-small"
+          type="button"
+          onClick={() =>
+            onExpand({
+              title: label,
+              subtitle: hint,
+              series,
+              accent,
+              formatValue,
+            })
+          }
+        >
+          Explore
+        </button>
+      ) : null}
     </div>
     <LineChart
       data={series}
       accent={accent}
       showLabels={false}
-      onExpand={
-        onExpand
-          ? () =>
-              onExpand({
-                title: label,
-                subtitle: hint,
-                series,
-                accent,
-              })
+      onExpand={onExpand ? () => onExpand({ title: label, subtitle: hint, series, accent, formatValue }) : undefined}
+      onFocus={
+        onFocus
+          ? (point) =>
+              onFocus(
+                point
+                  ? {
+                      label: point.label,
+                      value: point.value,
+                      formattedValue: formatValue ? formatValue(point.value) : formatNumber(point.value),
+                      metricLabel: label,
+                      accent,
+                    }
+                  : null
+              )
           : undefined
       }
+      formatValue={formatValue}
     />
   </div>
 );
+
+const defaultFilters: Filters = {
+  plan: '',
+  subscriptionStatus: '',
+  billingPeriod: '',
+  action: '',
+  route: '',
+  section: '',
+  feature: '',
+  eventName: '',
+  deviceType: '',
+  os: '',
+  browser: '',
+  referrer: '',
+  landingPage: '',
+  utmSource: '',
+  utmMedium: '',
+  utmCampaign: '',
+  utmTerm: '',
+  utmContent: '',
+};
+
+const FILTER_LABELS: Record<keyof Filters, string> = {
+  plan: 'Plan',
+  subscriptionStatus: 'Subscription',
+  billingPeriod: 'Billing',
+  action: 'Action',
+  route: 'Route',
+  section: 'Section',
+  feature: 'Feature',
+  eventName: 'Event',
+  deviceType: 'Device',
+  os: 'OS',
+  browser: 'Browser',
+  referrer: 'Referrer',
+  landingPage: 'Landing page',
+  utmSource: 'UTM source',
+  utmMedium: 'UTM medium',
+  utmCampaign: 'UTM campaign',
+  utmTerm: 'UTM term',
+  utmContent: 'UTM content',
+};
+
+const RANGE_PRESETS = [
+  { label: 'Last 7d', days: 7 },
+  { label: 'Last 30d', days: 30 },
+  { label: 'Last 90d', days: 90 },
+];
 
 const FiltersPanel = ({
   range,
@@ -414,6 +688,10 @@ const FiltersPanel = ({
   options,
   onRangeChange,
   onFilterChange,
+  onClearFilters,
+  activeFilters,
+  onPresetRange,
+  presets,
   onRefresh,
   refreshing,
   lastUpdated,
@@ -423,6 +701,10 @@ const FiltersPanel = ({
   options: Record<string, string[]>;
   onRangeChange: (next: DateRange) => void;
   onFilterChange: (key: keyof Filters, value: string) => void;
+  onClearFilters: () => void;
+  activeFilters: { key: keyof Filters; label: string; value: string }[];
+  onPresetRange: (days: number) => void;
+  presets: { label: string; days: number }[];
   onRefresh: () => void;
   refreshing: boolean;
   lastUpdated: Date | null;
@@ -439,6 +721,46 @@ const FiltersPanel = ({
         </button>
         <div className="filters-meta">Last refresh: {formatTimestamp(lastUpdated)}</div>
       </div>
+    </div>
+    <div className="filters-presets">
+      <div className="filters-meta">Quick range</div>
+      <div className="filters-pills">
+        {presets.map((preset) => (
+          <button
+            key={preset.label}
+            className="button button-ghost button-small"
+            type="button"
+            onClick={() => onPresetRange(preset.days)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+    </div>
+    <div className="filters-chips">
+      <div className="filters-meta">Active segments</div>
+      {activeFilters.length ? (
+        <div className="chips">
+          {activeFilters.map((item) => (
+            <button
+              key={item.key}
+              className="chip"
+              type="button"
+              onClick={() => onFilterChange(item.key, '')}
+            >
+              {item.label}: {item.value}
+              <span className="chip-close" aria-hidden="true">
+                x
+              </span>
+            </button>
+          ))}
+          <button className="button button-ghost button-small" type="button" onClick={onClearFilters}>
+            Clear all
+          </button>
+        </div>
+      ) : (
+        <div className="filters-empty">No active filters</div>
+      )}
     </div>
     <div className="filters">
       <label className="filter-control">
@@ -463,7 +785,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.plan.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -477,7 +799,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.subscriptionStatus.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -491,7 +813,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.billingPeriod.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -502,7 +824,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.action.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -513,7 +835,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.feature.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -524,7 +846,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.eventName.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -535,7 +857,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.route.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -546,7 +868,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.section.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -557,7 +879,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.deviceType.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -568,7 +890,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.os.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -579,7 +901,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.browser.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -590,7 +912,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.referrer.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -601,7 +923,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.landingPage.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -612,7 +934,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.utmSource.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -623,7 +945,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.utmMedium.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -634,7 +956,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.utmCampaign.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -645,7 +967,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.utmTerm.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -656,7 +978,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.utmContent.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatFilterValue(option)}
             </option>
           ))}
         </select>
@@ -667,30 +989,12 @@ const FiltersPanel = ({
 
 export default function Dashboard() {
   const [range, setRange] = useState<DateRange>(() => getDefaultRange());
-  const [filters, setFilters] = useState<Filters>({
-    plan: '',
-    subscriptionStatus: '',
-    billingPeriod: '',
-    action: '',
-    route: '',
-    section: '',
-    feature: '',
-    eventName: '',
-    deviceType: '',
-    os: '',
-    browser: '',
-    referrer: '',
-    landingPage: '',
-    utmSource: '',
-    utmMedium: '',
-    utmCampaign: '',
-    utmTerm: '',
-    utmContent: '',
-  });
+  const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const wasLoading = useRef(false);
   const [expandedChart, setExpandedChart] = useState<ExpandedChart | null>(null);
+  const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null);
 
   const { events, loading, error, truncated } = useUsageEvents(range, filters, true, refreshTick);
 
@@ -709,6 +1013,13 @@ export default function Dashboard() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [expandedChart]);
+
+  useEffect(() => {
+    if (!focusPoint) return;
+    if (focusPoint.label < range.start || focusPoint.label > range.end) {
+      setFocusPoint(null);
+    }
+  }, [focusPoint, range.start, range.end]);
 
   const dailyBuckets = useMemo(() => buildDailyBuckets(events, range), [events, range]);
   const dailyUsersSeries = useMemo(() => buildSeries(dailyBuckets, (b) => b.users.size), [dailyBuckets]);
@@ -822,14 +1133,18 @@ export default function Dashboard() {
   const errorCodes = extractTopProperty(events, 'error_code', 5);
 
   const contentEvents = events.filter((event) => CONTENT_EVENT_NAMES.includes(event.event_name));
-  const aiEvents = events.filter((event) => AI_PRODUCT_KEYS.has(event.event_name));
+  const aiEvents = events.filter(isAiEvent);
+  const aiEventsNormalized = aiEvents.map((event) => ({
+    ...event,
+    feature: normalizeAiFeature(event.feature) ?? event.feature,
+  }));
 
   const aiSuccessRate = computeSuccessRate(aiEvents).successRate;
   const aiShare = safeDivide(aiEvents.length, events.length);
   const contentShare = safeDivide(contentEvents.length, events.length);
   const anonShare = safeDivide(totalAnonEvents, events.length);
   const paywallRate = safeDivide(totalPaywallEvents, events.length);
-  const aiTopModules = buildBarList(aiEvents, 'feature', 5);
+  const aiTopModules = buildBarList(aiEventsNormalized, 'feature', 5);
 
   const options = useMemo(
     () => ({
@@ -855,8 +1170,202 @@ export default function Dashboard() {
     [events]
   );
 
+  const activeFilters = useMemo(
+    () =>
+      (Object.entries(filters) as [keyof Filters, string][])
+        .filter(([, value]) => value)
+        .map(([key, value]) => ({
+          key,
+          label: FILTER_LABELS[key],
+          value: formatFilterValue(value),
+        })),
+    [filters]
+  );
+
+  const focusBucket = useMemo(() => {
+    if (!focusPoint) return null;
+    return dailyBuckets.find((bucket) => bucket.day === focusPoint.label) ?? null;
+  }, [dailyBuckets, focusPoint]);
+
+  const focusStats = useMemo(() => {
+    if (!focusBucket) return [];
+    const successRate = computeRate(focusBucket.successCount, focusBucket.successTotal);
+    const paywallRate = computeRate(focusBucket.paywallEvents, focusBucket.events);
+    const avgLatency = safeDivide(focusBucket.latencySum, focusBucket.latencyCount);
+    return [
+      { label: 'Users', value: formatNumber(focusBucket.users.size) },
+      { label: 'Sessions', value: formatNumber(focusBucket.sessions.size) },
+      { label: 'Events', value: formatNumber(focusBucket.events) },
+      { label: 'Success rate', value: formatPercent(successRate) },
+      { label: 'Paywall rate', value: formatPercent(paywallRate) },
+      { label: 'Avg latency', value: focusBucket.latencyCount ? `${Math.round(avgLatency)} ms` : 'n/a' },
+    ];
+  }, [focusBucket]);
+
+  const handlePresetRange = (days: number) => setRange(buildPresetRange(days));
+  const clearFilters = () => setFilters(defaultFilters);
+  const zoomToDay = (day: string) => setRange({ start: day, end: day });
+  const handleFilterSelect = (key: keyof Filters, value: string) => {
+    setFilters((prev) => ({ ...prev, [key]: prev[key] === value ? '' : value }));
+  };
+
+  const dailyEventsChange = useMemo(() => findChangeExtremes(dailyEventsSeries), [dailyEventsSeries]);
+  const peakEvents = useMemo(() => findPeak(dailyBuckets, (bucket) => bucket.events), [dailyBuckets]);
+  const peakUsers = useMemo(() => findPeak(dailyBuckets, (bucket) => bucket.users.size), [dailyBuckets]);
+  const peakLatency = useMemo(
+    () => findPeak(dailyBuckets, (bucket) => safeDivide(bucket.latencySum, bucket.latencyCount)),
+    [dailyBuckets]
+  );
+  const peakPaywallRate = useMemo(
+    () => findPeak(dailyBuckets, (bucket) => safeDivide(bucket.paywallEvents, bucket.events)),
+    [dailyBuckets]
+  );
+
+  const insightItems = useMemo(() => {
+    const items: InsightItem[] = [];
+    if (peakEvents) {
+      items.push({
+        title: 'Peak events',
+        value: formatNumber(peakEvents.value),
+        caption: `Events on ${peakEvents.day}`,
+        day: peakEvents.day,
+        accent: '#f4a259',
+      });
+    }
+    if (peakUsers) {
+      items.push({
+        title: 'Peak users',
+        value: formatNumber(peakUsers.value),
+        caption: `Active users on ${peakUsers.day}`,
+        day: peakUsers.day,
+        accent: '#5db7a5',
+      });
+    }
+    if (dailyEventsChange.increase) {
+      items.push({
+        title: 'Biggest lift',
+        value: formatSignedNumber(dailyEventsChange.increase.value),
+        caption: `Events vs prior day on ${dailyEventsChange.increase.day}`,
+        day: dailyEventsChange.increase.day,
+        accent: '#f2c14e',
+      });
+    }
+    if (dailyEventsChange.decrease) {
+      items.push({
+        title: 'Biggest drop',
+        value: formatSignedNumber(dailyEventsChange.decrease.value),
+        caption: `Events vs prior day on ${dailyEventsChange.decrease.day}`,
+        day: dailyEventsChange.decrease.day,
+        accent: '#f28f79',
+      });
+    }
+    if (peakPaywallRate && peakPaywallRate.value > 0) {
+      items.push({
+        title: 'Paywall spike',
+        value: formatPercent(peakPaywallRate.value),
+        caption: `Rate on ${peakPaywallRate.day}`,
+        day: peakPaywallRate.day,
+        accent: '#f28f79',
+      });
+    }
+    if (peakLatency && peakLatency.value > 0) {
+      items.push({
+        title: 'Latency high',
+        value: `${Math.round(peakLatency.value)} ms`,
+        caption: `Avg latency on ${peakLatency.day}`,
+        day: peakLatency.day,
+        accent: '#f4a259',
+      });
+    }
+    return items.slice(0, 6);
+  }, [dailyEventsChange, peakEvents, peakUsers, peakPaywallRate, peakLatency]);
+
+  const pulseStart = useMemo(() => new Date(endDate.getTime() - 6 * DAY_MS), [endDate]);
+  const prevPulseEnd = useMemo(() => new Date(pulseStart.getTime() - DAY_MS), [pulseStart]);
+  const prevPulseStart = useMemo(() => new Date(prevPulseEnd.getTime() - 6 * DAY_MS), [prevPulseEnd]);
+  const hasPrevPulse = rangeStartDate <= prevPulseStart;
+  const pulseEvents = useMemo(() => filterByDateRange(events, pulseStart, endDate), [events, pulseStart, endDate]);
+  const prevPulseEvents = useMemo(
+    () => (hasPrevPulse ? filterByDateRange(events, prevPulseStart, prevPulseEnd) : []),
+    [events, hasPrevPulse, prevPulseStart, prevPulseEnd]
+  );
+  const pulseUsers = distinctCount(pulseEvents, 'user_id');
+  const pulseSessions = distinctCount(pulseEvents, 'session_id');
+  const pulseSuccessRate = computeSuccessRate(pulseEvents).successRate;
+  const pulsePaywallRate = computeRate(
+    pulseEvents.filter((event) => event.event_name === 'paywall_block').length,
+    pulseEvents.length
+  );
+  const prevPulseUsers = hasPrevPulse ? distinctCount(prevPulseEvents, 'user_id') : 0;
+  const prevPulseSessions = hasPrevPulse ? distinctCount(prevPulseEvents, 'session_id') : 0;
+  const prevPulseSuccessRate = hasPrevPulse ? computeSuccessRate(prevPulseEvents).successRate : null;
+  const prevPulsePaywallRate = hasPrevPulse
+    ? computeRate(
+        prevPulseEvents.filter((event) => event.event_name === 'paywall_block').length,
+        prevPulseEvents.length
+      )
+    : null;
+
+  const pulseCards = [
+    {
+      label: 'Active users (7d)',
+      value: formatNumber(pulseUsers),
+      deltaValue: hasPrevPulse ? computeDelta(pulseUsers, prevPulseUsers) : null,
+      deltaText: formatDeltaPercent(hasPrevPulse ? computeDelta(pulseUsers, prevPulseUsers) : null),
+    },
+    {
+      label: 'Sessions (7d)',
+      value: formatNumber(pulseSessions),
+      deltaValue: hasPrevPulse ? computeDelta(pulseSessions, prevPulseSessions) : null,
+      deltaText: formatDeltaPercent(hasPrevPulse ? computeDelta(pulseSessions, prevPulseSessions) : null),
+    },
+    {
+      label: 'Events (7d)',
+      value: formatNumber(pulseEvents.length),
+      deltaValue: hasPrevPulse ? computeDelta(pulseEvents.length, prevPulseEvents.length) : null,
+      deltaText: formatDeltaPercent(hasPrevPulse ? computeDelta(pulseEvents.length, prevPulseEvents.length) : null),
+    },
+    {
+      label: 'Success rate (7d)',
+      value: formatPercent(pulseSuccessRate),
+      deltaValue:
+        pulseSuccessRate !== null && prevPulseSuccessRate !== null ? pulseSuccessRate - prevPulseSuccessRate : null,
+      deltaText:
+        pulseSuccessRate !== null && prevPulseSuccessRate !== null
+          ? formatDeltaPoints(pulseSuccessRate - prevPulseSuccessRate)
+          : 'n/a',
+    },
+    {
+      label: 'Paywall rate (7d)',
+      value: formatPercent(pulsePaywallRate),
+      deltaValue:
+        pulsePaywallRate !== null && prevPulsePaywallRate !== null ? pulsePaywallRate - prevPulsePaywallRate : null,
+      deltaText:
+        pulsePaywallRate !== null && prevPulsePaywallRate !== null
+          ? formatDeltaPoints(pulsePaywallRate - prevPulsePaywallRate)
+          : 'n/a',
+    },
+  ];
+
   const rangeLabel = `${range.start} to ${range.end}`;
   const openChart = (chart: ExpandedChart) => setExpandedChart(chart);
+  const pulseComparisonLabel = hasPrevPulse ? 'vs prev 7d' : 'prev 7d not in range';
+  const buildFocusHandler =
+    (metricLabel: string, formatter?: (value: number) => string, accent?: string) =>
+    (point: { label: string; value: number } | null) =>
+      setFocusPoint(
+        point
+          ? {
+              label: point.label,
+              value: point.value,
+              formattedValue: formatter ? formatter(point.value) : formatNumber(point.value),
+              metricLabel,
+              accent,
+            }
+          : null
+      );
+  const expandedStats = expandedChart ? computeSeriesStats(expandedChart.series) : null;
+  const expandedFormatter = expandedChart?.formatValue ?? formatNumber;
 
   return (
     <div className="app-content">
@@ -879,8 +1388,11 @@ export default function Dashboard() {
                   title: 'Daily actives',
                   subtitle: rangeLabel,
                   series: dailyUsersSeries,
+                  formatValue: formatNumber,
                 })
               }
+              onFocus={buildFocusHandler('Daily actives', formatNumber)}
+              formatValue={formatNumber}
             />
           </div>
         </div>
@@ -891,6 +1403,10 @@ export default function Dashboard() {
           options={options}
           onRangeChange={setRange}
           onFilterChange={(key, value) => setFilters((prev) => ({ ...prev, [key]: value }))}
+          onClearFilters={clearFilters}
+          activeFilters={activeFilters}
+          onPresetRange={handlePresetRange}
+          presets={RANGE_PRESETS}
           onRefresh={() => setRefreshTick((prev) => prev + 1)}
           refreshing={loading}
           lastUpdated={lastUpdated}
@@ -904,6 +1420,98 @@ export default function Dashboard() {
         ) : null}
         {error ? <div className="notice">{error}</div> : null}
 
+        <div className="insights-grid" style={{ marginTop: '20px' }}>
+          <div className="section-card focus-card">
+            <div className="section-title">Focus day</div>
+            <div className="section-subtitle">Hover any chart to inspect daily details</div>
+            {focusPoint ? (
+              <>
+                <div className="focus-header">
+                  <div>
+                    <div className="focus-metric">{focusPoint.metricLabel}</div>
+                    <div className="focus-value" style={{ color: focusPoint.accent || 'var(--accent)' }}>
+                      {focusPoint.formattedValue}
+                    </div>
+                    <div className="focus-date">{focusPoint.label}</div>
+                  </div>
+                  <div className="focus-actions">
+                    <button className="button button-ghost button-small" type="button" onClick={() => zoomToDay(focusPoint.label)}>
+                      Zoom to day
+                    </button>
+                    <button className="button button-ghost button-small" type="button" onClick={() => setFocusPoint(null)}>
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                {focusStats.length ? (
+                  <div className="focus-grid">
+                    {focusStats.map((stat) => (
+                      <div key={stat.label} className="focus-stat">
+                        <div className="focus-stat-label">{stat.label}</div>
+                        <div className="focus-stat-value">{stat.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="focus-empty">No daily bucket found for this date.</div>
+                )}
+              </>
+            ) : (
+              <div className="focus-empty">
+                Hover a chart to inspect a day. The last point stays here until you clear it.
+              </div>
+            )}
+          </div>
+          <div className="section-card">
+            <div className="section-title">Highlights</div>
+            <div className="section-subtitle">Peaks and shifts inside the selected range</div>
+            {insightItems.length ? (
+              <div className="insight-list">
+                {insightItems.map((item) => (
+                  <div key={item.title} className="insight-item">
+                    <div className="insight-value" style={{ color: item.accent || 'var(--accent)' }}>
+                      {item.value}
+                    </div>
+                    <div className="insight-body">
+                      <div className="insight-title">{item.title}</div>
+                      <div className="insight-caption">{item.caption}</div>
+                    </div>
+                    {item.day ? (
+                      <button
+                        className="button button-ghost button-small"
+                        type="button"
+                        onClick={() => zoomToDay(item.day)}
+                      >
+                        Zoom day
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="focus-empty">No highlights detected for this range yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="section-card" style={{ marginTop: '20px' }}>
+          <div className="section-title">Pulse</div>
+          <div className="section-subtitle">Last 7 days snapshot, {pulseComparisonLabel}</div>
+          <div className="kpi-grid">
+            {pulseCards.map((card) => {
+              const deltaClass =
+                card.deltaValue === null ? 'neutral' : card.deltaValue >= 0 ? 'up' : 'down';
+              return (
+                <div key={card.label} className="kpi-card">
+                  <div className="kpi-label">{card.label}</div>
+                  <div className="kpi-value">{card.value}</div>
+                  <div className={`kpi-delta ${deltaClass}`}>{card.deltaText}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="section-card" style={{ marginTop: '20px' }}>
           <div className="section-title">Activity trends</div>
           <div className="section-subtitle">DAU, WAU, MAU, sessions and event volume</div>
@@ -914,6 +1522,7 @@ export default function Dashboard() {
               hint="Last day"
               series={dailyUsersSeries}
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="WAU (7d rolling users)"
@@ -922,6 +1531,7 @@ export default function Dashboard() {
               series={rollingWauSeries}
               accent="#5db7a5"
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="MAU (30d rolling users)"
@@ -930,6 +1540,7 @@ export default function Dashboard() {
               series={rollingMauSeries}
               accent="#f28f79"
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="Sessions"
@@ -938,6 +1549,7 @@ export default function Dashboard() {
               series={dailySessionsSeries}
               accent="#5db7a5"
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="Login users"
@@ -946,6 +1558,7 @@ export default function Dashboard() {
               series={dailyLoginUsersSeries}
               accent="#f2c14e"
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="Avg session duration"
@@ -954,6 +1567,8 @@ export default function Dashboard() {
               series={dailySessionDurationSeries}
               accent="#f4a259"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={formatDuration}
             />
             <MetricCard
               label="Events"
@@ -961,6 +1576,7 @@ export default function Dashboard() {
               hint="All events"
               series={dailyEventsSeries}
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="Events/User"
@@ -969,6 +1585,8 @@ export default function Dashboard() {
               series={dailyEventsPerUserSeries}
               accent="#f28f79"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={formatDecimal}
             />
             <MetricCard
               label="Sessions/User"
@@ -977,6 +1595,8 @@ export default function Dashboard() {
               series={dailySessionsPerUserSeries}
               accent="#5db7a5"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={formatDecimal}
             />
             <MetricCard
               label="Events/Session"
@@ -985,6 +1605,8 @@ export default function Dashboard() {
               series={dailyEventsPerSessionSeries}
               accent="#f4a259"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={formatDecimal}
             />
           </div>
         </div>
@@ -1000,6 +1622,8 @@ export default function Dashboard() {
               series={dailySuccessRateSeries}
               accent="#5db7a5"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={(value) => formatPercent(value)}
             />
             <MetricCard
               label="Error rate"
@@ -1008,6 +1632,8 @@ export default function Dashboard() {
               series={dailyErrorRateSeries}
               accent="#f28f79"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={(value) => formatPercent(value)}
             />
             <MetricCard
               label="Avg latency (ms)"
@@ -1016,6 +1642,8 @@ export default function Dashboard() {
               series={dailyLatencySeries}
               accent="#f4a259"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={(value) => `${Math.round(value)} ms`}
             />
             <MetricCard
               label="Paywall rate"
@@ -1024,6 +1652,8 @@ export default function Dashboard() {
               series={dailyPaywallRateSeries}
               accent="#f28f79"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={(value) => formatPercent(value)}
             />
             <MetricCard
               label="Anon share"
@@ -1032,6 +1662,8 @@ export default function Dashboard() {
               series={dailyAnonShareSeries}
               accent="#5db7a5"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={(value) => formatPercent(value)}
             />
           </div>
         </div>
@@ -1046,14 +1678,16 @@ export default function Dashboard() {
               hint="Reports + content"
               series={dailyContentEventsSeries}
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="AI events"
               value={formatNumber(aiEvents.length)}
-              hint="analysis_run + validator_run"
+              hint="analysis_run + validator_run + module runs"
               series={dailyAiEventsSeries}
               accent="#5db7a5"
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
             <MetricCard
               label="Content share"
@@ -1062,6 +1696,8 @@ export default function Dashboard() {
               series={dailyContentShareSeries}
               accent="#f4a259"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={(value) => formatPercent(value)}
             />
             <MetricCard
               label="AI share"
@@ -1070,6 +1706,8 @@ export default function Dashboard() {
               series={dailyAiShareSeries}
               accent="#5db7a5"
               onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={(value) => formatPercent(value)}
             />
             <MetricCard
               label="Paywall blocks"
@@ -1078,6 +1716,7 @@ export default function Dashboard() {
               series={dailyPaywallSeries}
               accent="#f28f79"
               onExpand={openChart}
+              onFocus={setFocusPoint}
             />
           </div>
         </div>
@@ -1093,10 +1732,11 @@ export default function Dashboard() {
                   key={product.key}
                   label={product.label}
                   value={formatNumber(product.total)}
-                  hint={`event_name: ${product.key} | AI share: ${formatPercent(share)}`}
+                  hint={`module_key: ${product.key} | AI share: ${formatPercent(share)}`}
                   series={product.series}
                   accent={product.accent}
                   onExpand={openChart}
+                  onFocus={setFocusPoint}
                 />
               );
             })}
@@ -1108,10 +1748,34 @@ export default function Dashboard() {
           <div className="section-subtitle">Event mix, features, and sections</div>
         </div>
         <div className="section-grid" style={{ marginTop: '12px' }}>
-          <BarList title="Top events" data={eventCounts} />
-          <BarList title="Action mix" data={actionCounts} />
-          <BarList title="Active users by feature" data={featureUsage} />
-          <BarList title="Active users by section" data={sectionUsage} />
+          <BarList
+            title="Top events"
+            data={eventCounts}
+            onSelect={(value) => handleFilterSelect('eventName', value)}
+            activeValue={filters.eventName}
+            filterLabel="event"
+          />
+          <BarList
+            title="Action mix"
+            data={actionCounts}
+            onSelect={(value) => handleFilterSelect('action', value)}
+            activeValue={filters.action}
+            filterLabel="action"
+          />
+          <BarList
+            title="Active users by feature"
+            data={featureUsage}
+            onSelect={(value) => handleFilterSelect('feature', value)}
+            activeValue={filters.feature}
+            filterLabel="feature"
+          />
+          <BarList
+            title="Active users by section"
+            data={sectionUsage}
+            onSelect={(value) => handleFilterSelect('section', value)}
+            activeValue={filters.section}
+            filterLabel="section"
+          />
         </div>
 
         <div style={{ marginTop: '28px' }}>
@@ -1119,9 +1783,27 @@ export default function Dashboard() {
           <div className="section-subtitle">Access distribution and billing</div>
         </div>
         <div className="section-grid" style={{ marginTop: '12px' }}>
-          <BarList title="Active users by plan" data={planUsage} />
-          <BarList title="Active users by status" data={subscriptionStatusUsage} />
-          <BarList title="Active users by billing period" data={billingPeriodUsage} />
+          <BarList
+            title="Active users by plan"
+            data={planUsage}
+            onSelect={(value) => handleFilterSelect('plan', value)}
+            activeValue={filters.plan}
+            filterLabel="plan"
+          />
+          <BarList
+            title="Active users by status"
+            data={subscriptionStatusUsage}
+            onSelect={(value) => handleFilterSelect('subscriptionStatus', value)}
+            activeValue={filters.subscriptionStatus}
+            filterLabel="status"
+          />
+          <BarList
+            title="Active users by billing period"
+            data={billingPeriodUsage}
+            onSelect={(value) => handleFilterSelect('billingPeriod', value)}
+            activeValue={filters.billingPeriod}
+            filterLabel="billing period"
+          />
         </div>
 
         <div style={{ marginTop: '28px' }}>
@@ -1129,14 +1811,62 @@ export default function Dashboard() {
           <div className="section-subtitle">Routes, landing pages, and UTM parameters</div>
         </div>
         <div className="section-grid" style={{ marginTop: '12px' }}>
-          <BarList title="Top routes" data={routeCounts} />
-          <BarList title="Landing pages" data={landingPages} />
-          <BarList title="Referrers" data={referrers} />
-          <BarList title="UTM source" data={utmSources} />
-          <BarList title="UTM medium" data={utmMediums} />
-          <BarList title="UTM campaign" data={utmCampaigns} />
-          <BarList title="UTM term" data={utmTerms} />
-          <BarList title="UTM content" data={utmContents} />
+          <BarList
+            title="Top routes"
+            data={routeCounts}
+            onSelect={(value) => handleFilterSelect('route', value)}
+            activeValue={filters.route}
+            filterLabel="route"
+          />
+          <BarList
+            title="Landing pages"
+            data={landingPages}
+            onSelect={(value) => handleFilterSelect('landingPage', value)}
+            activeValue={filters.landingPage}
+            filterLabel="landing page"
+          />
+          <BarList
+            title="Referrers"
+            data={referrers}
+            onSelect={(value) => handleFilterSelect('referrer', value)}
+            activeValue={filters.referrer}
+            filterLabel="referrer"
+          />
+          <BarList
+            title="UTM source"
+            data={utmSources}
+            onSelect={(value) => handleFilterSelect('utmSource', value)}
+            activeValue={filters.utmSource}
+            filterLabel="UTM source"
+          />
+          <BarList
+            title="UTM medium"
+            data={utmMediums}
+            onSelect={(value) => handleFilterSelect('utmMedium', value)}
+            activeValue={filters.utmMedium}
+            filterLabel="UTM medium"
+          />
+          <BarList
+            title="UTM campaign"
+            data={utmCampaigns}
+            onSelect={(value) => handleFilterSelect('utmCampaign', value)}
+            activeValue={filters.utmCampaign}
+            filterLabel="UTM campaign"
+          />
+          <BarList
+            title="UTM term"
+            data={utmTerms}
+            onSelect={(value) => handleFilterSelect('utmTerm', value)}
+            activeValue={filters.utmTerm}
+            filterLabel="UTM term"
+          />
+          <BarList
+            title="UTM content"
+            data={utmContents}
+            onSelect={(value) => handleFilterSelect('utmContent', value)}
+            activeValue={filters.utmContent}
+            filterLabel="UTM content"
+          />
         </div>
 
         <div style={{ marginTop: '28px' }}>
@@ -1144,9 +1874,27 @@ export default function Dashboard() {
           <div className="section-subtitle">Distribution by device, OS, and browser</div>
         </div>
         <div className="section-grid" style={{ marginTop: '12px' }}>
-          <BarList title="Device type" data={deviceUsage} />
-          <BarList title="OS" data={osUsage} />
-          <BarList title="Browser" data={browserUsage} />
+          <BarList
+            title="Device type"
+            data={deviceUsage}
+            onSelect={(value) => handleFilterSelect('deviceType', value)}
+            activeValue={filters.deviceType}
+            filterLabel="device"
+          />
+          <BarList
+            title="OS"
+            data={osUsage}
+            onSelect={(value) => handleFilterSelect('os', value)}
+            activeValue={filters.os}
+            filterLabel="OS"
+          />
+          <BarList
+            title="Browser"
+            data={browserUsage}
+            onSelect={(value) => handleFilterSelect('browser', value)}
+            activeValue={filters.browser}
+            filterLabel="browser"
+          />
         </div>
 
         <div className="section-grid" style={{ marginTop: '20px' }}>
@@ -1226,8 +1974,11 @@ export default function Dashboard() {
                   subtitle: rangeLabel,
                   series: dailyContentEventsSeries,
                   accent: '#f4a259',
+                  formatValue: formatNumber,
                 })
               }
+              onFocus={buildFocusHandler('Content events', formatNumber, '#f4a259')}
+              formatValue={formatNumber}
             />
           </div>
           <div className="section-card">
@@ -1259,8 +2010,11 @@ export default function Dashboard() {
                   subtitle: rangeLabel,
                   series: dailyAiEventsSeries,
                   accent: '#5db7a5',
+                  formatValue: formatNumber,
                 })
               }
+              onFocus={buildFocusHandler('AI events', formatNumber, '#5db7a5')}
+              formatValue={formatNumber}
             />
             {aiTopModules.length ? (
               <div style={{ marginTop: '12px' }}>
@@ -1363,7 +2117,30 @@ export default function Dashboard() {
                 Close
               </button>
             </div>
-            <LineChart data={expandedChart.series} accent={expandedChart.accent} />
+            {expandedStats ? (
+              <div className="chart-stats">
+                <div className="chart-stat">
+                  <div className="chart-stat-label">Avg</div>
+                  <div className="chart-stat-value">{expandedFormatter(expandedStats.avg)}</div>
+                </div>
+                <div className="chart-stat">
+                  <div className="chart-stat-label">Min</div>
+                  <div className="chart-stat-value">{expandedFormatter(expandedStats.min.value)}</div>
+                  <div className="chart-stat-meta">{expandedStats.min.label}</div>
+                </div>
+                <div className="chart-stat">
+                  <div className="chart-stat-label">Max</div>
+                  <div className="chart-stat-value">{expandedFormatter(expandedStats.max.value)}</div>
+                  <div className="chart-stat-meta">{expandedStats.max.label}</div>
+                </div>
+              </div>
+            ) : null}
+            <LineChart
+              data={expandedChart.series}
+              accent={expandedChart.accent}
+              formatValue={expandedChart.formatValue}
+              onFocus={buildFocusHandler(expandedChart.title, expandedChart.formatValue, expandedChart.accent)}
+            />
           </div>
         </div>
       ) : null}

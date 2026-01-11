@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSupabaseClient, hasSupabaseConfig } from '../lib/supabase';
+import { EMPTY_FILTER_VALUE } from '../types';
 import type { DateRange, Filters, UsageEvent } from '../types';
 
 const SELECT_FIELDS = [
@@ -36,25 +37,31 @@ const toUtcRange = (range: DateRange) => {
   return { startIso, endIso };
 };
 
+const applyFilter = (query: any, column: string, value: string) => {
+  if (!value) return query;
+  if (value === EMPTY_FILTER_VALUE) return query.is(column, null);
+  return query.eq(column, value);
+};
+
 const applyFilters = (query: any, filters: Filters) => {
-  if (filters.plan) query = query.eq('plan', filters.plan);
-  if (filters.subscriptionStatus) query = query.eq('subscription_status', filters.subscriptionStatus);
-  if (filters.billingPeriod) query = query.eq('billing_period', filters.billingPeriod);
-  if (filters.action) query = query.eq('action', filters.action);
-  if (filters.route) query = query.eq('route', filters.route);
-  if (filters.section) query = query.eq('section', filters.section);
-  if (filters.feature) query = query.eq('feature', filters.feature);
-  if (filters.eventName) query = query.eq('event_name', filters.eventName);
-  if (filters.deviceType) query = query.eq('device_type', filters.deviceType);
-  if (filters.os) query = query.eq('os', filters.os);
-  if (filters.browser) query = query.eq('browser', filters.browser);
-  if (filters.referrer) query = query.eq('referrer', filters.referrer);
-  if (filters.landingPage) query = query.eq('landing_page', filters.landingPage);
-  if (filters.utmSource) query = query.eq('utm_source', filters.utmSource);
-  if (filters.utmMedium) query = query.eq('utm_medium', filters.utmMedium);
-  if (filters.utmCampaign) query = query.eq('utm_campaign', filters.utmCampaign);
-  if (filters.utmTerm) query = query.eq('utm_term', filters.utmTerm);
-  if (filters.utmContent) query = query.eq('utm_content', filters.utmContent);
+  query = applyFilter(query, 'plan', filters.plan);
+  query = applyFilter(query, 'subscription_status', filters.subscriptionStatus);
+  query = applyFilter(query, 'billing_period', filters.billingPeriod);
+  query = applyFilter(query, 'action', filters.action);
+  query = applyFilter(query, 'route', filters.route);
+  query = applyFilter(query, 'section', filters.section);
+  query = applyFilter(query, 'feature', filters.feature);
+  query = applyFilter(query, 'event_name', filters.eventName);
+  query = applyFilter(query, 'device_type', filters.deviceType);
+  query = applyFilter(query, 'os', filters.os);
+  query = applyFilter(query, 'browser', filters.browser);
+  query = applyFilter(query, 'referrer', filters.referrer);
+  query = applyFilter(query, 'landing_page', filters.landingPage);
+  query = applyFilter(query, 'utm_source', filters.utmSource);
+  query = applyFilter(query, 'utm_medium', filters.utmMedium);
+  query = applyFilter(query, 'utm_campaign', filters.utmCampaign);
+  query = applyFilter(query, 'utm_term', filters.utmTerm);
+  query = applyFilter(query, 'utm_content', filters.utmContent);
   return query;
 };
 

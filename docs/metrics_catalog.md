@@ -45,7 +45,7 @@ This list is derived from `usage_events` and is grouped by dashboard sections.
 - Top report_id / content_id by engagement
 
 ## AI modules
-- analysis_run volume by feature
+- AI run volume by module (analysis_run, validator_run, qualitativo_run, valuai_run)
 - Success rate by model or module
 - Avg latency_ms
 - Error rate and top error_code

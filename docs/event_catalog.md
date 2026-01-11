@@ -68,17 +68,21 @@ Required in every event:
 
 ## IAnalista (AI)
 
+Notes:
+- The database normalizes `analysis_run` with feature `qualitativo`/`valuai` into `qualitativo_run`/`valuai_run`.
+- Keep `feature` aligned to the module name even when the event_name is normalized.
+
 | event_name | feature | action | properties (required) | properties (optional) | notes |
 | --- | --- | --- | --- | --- | --- |
 | analysis_run | validador | start | ticker | prompt_length |  |
 | analysis_run | validador | success | ticker | model, latency_ms, token_count |  |
 | analysis_run | validador | error | ticker, error_code | error, latency_ms |  |
-| analysis_run | qualitativo | start | ticker |  |  |
-| analysis_run | qualitativo | success | ticker | score, latency_ms |  |
-| analysis_run | qualitativo | error | ticker, error_code |  |  |
-| analysis_run | valuai | start | ticker |  |  |
-| analysis_run | valuai | success | ticker | valuation, latency_ms |  |
-| analysis_run | valuai | error | ticker, error_code |  |  |
+| qualitativo_run | qualitativo | start | ticker |  |  |
+| qualitativo_run | qualitativo | success | ticker | score, latency_ms |  |
+| qualitativo_run | qualitativo | error | ticker, error_code |  |  |
+| valuai_run | valuai | start | ticker |  |  |
+| valuai_run | valuai | success | ticker | valuation, latency_ms |  |
+| valuai_run | valuai | error | ticker, error_code |  |  |
 | validator_run | validador | success | ticker | issues_count |  |
 
 ## IAlocador

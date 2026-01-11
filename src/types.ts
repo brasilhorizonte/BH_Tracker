@@ -52,9 +52,13 @@ export type Filters = {
   utmContent: string;
 };
 
+export const EMPTY_FILTER_VALUE = '__empty__';
+
 export type BarDatum = {
   label: string;
   value: number;
+  key?: string;
+  isFallback?: boolean;
 };
 
 export type DailyDatum = {

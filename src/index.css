@@ -153,6 +153,23 @@ button, input, select {
   background: #f7b273;
 }
 
+.button-ghost {
+  background: rgba(93, 183, 165, 0.12);
+  border: 1px solid rgba(93, 183, 165, 0.35);
+  color: var(--text);
+}
+
+.button-ghost:hover {
+  border-color: var(--accent-2);
+}
+
+.button-small {
+  padding: 6px 12px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .hero {
   display: grid;
   grid-template-columns: minmax(260px, 0.7fr) minmax(360px, 1.3fr);
@@ -230,7 +247,20 @@ button, input, select {
 .kpi-delta {
   margin-top: 8px;
   font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.kpi-delta.up {
   color: var(--accent-2);
+}
+
+.kpi-delta.down {
+  color: var(--accent-3);
+}
+
+.kpi-delta.neutral {
+  color: var(--text-muted);
 }
 
 .metric-grid {
@@ -310,6 +340,116 @@ button, input, select {
   margin-bottom: 16px;
 }
 
+.insights-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 24px;
+}
+
+.focus-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.focus-metric {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+}
+
+.focus-value {
+  font-size: 26px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.focus-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.focus-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.focus-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.focus-stat {
+  background: rgba(7, 15, 16, 0.35);
+  border-radius: 12px;
+  border: 1px solid rgba(93, 183, 165, 0.2);
+  padding: 12px;
+}
+
+.focus-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-muted);
+}
+
+.focus-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.focus-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.insight-list {
+  display: grid;
+  gap: 12px;
+}
+
+.insight-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(244, 162, 89, 0.2);
+  background: rgba(7, 15, 16, 0.35);
+}
+
+.insight-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.insight-body {
+  display: grid;
+  gap: 4px;
+}
+
+.insight-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+}
+
+.insight-caption {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
 .filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -333,6 +473,57 @@ button, input, select {
 }
 
 .filters-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.filters-presets,
+.filters-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.filters-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 162, 89, 0.3);
+  background: rgba(244, 162, 89, 0.12);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.chip-close {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.filters-empty {
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -372,6 +563,35 @@ button, input, select {
   align-items: center;
   gap: 12px;
   font-size: 14px;
+}
+
+.bar-item-button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 8px 10px;
+  text-align: left;
+  color: inherit;
+  width: 100%;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.bar-item-button:hover {
+  border-color: rgba(244, 162, 89, 0.35);
+  background: rgba(7, 15, 16, 0.35);
+  transform: translateY(-1px);
+}
+
+.bar-item.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(244, 162, 89, 0.35);
+}
+
+.bar-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .bar-track {
@@ -492,6 +712,8 @@ button, input, select {
   border-radius: 16px;
   padding: 18px;
   border: 1px solid rgba(93, 183, 165, 0.2);
+  position: relative;
+  overflow: visible;
 }
 
 .chart-clickable {
@@ -508,6 +730,42 @@ button, input, select {
 .line-chart {
   width: 100%;
   height: 220px;
+}
+
+.chart-tooltip {
+  position: absolute;
+  top: 12px;
+  transform: translateX(-50%);
+  background: rgba(16, 47, 51, 0.95);
+  border: 1px solid rgba(93, 183, 165, 0.4);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
+  min-width: 120px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+}
+
+.chart-tooltip-value {
+  font-weight: 600;
+}
+
+.chart-tooltip-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.chart-guide {
+  stroke: rgba(244, 162, 89, 0.35);
+  stroke-width: 0.8;
+  stroke-dasharray: 3 3;
+}
+
+.chart-dot {
+  stroke: rgba(12, 27, 29, 0.8);
+  stroke-width: 0.9;
 }
 
 .chart-modal {
@@ -537,6 +795,38 @@ button, input, select {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.chart-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.chart-stat {
+  background: rgba(7, 15, 16, 0.35);
+  border: 1px solid rgba(93, 183, 165, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.chart-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-muted);
+}
+
+.chart-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.chart-stat-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
 }
 
 .chart-modal-meta {
@@ -597,5 +887,15 @@ button, input, select {
   .bar-item {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+
+  .insight-item {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .focus-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

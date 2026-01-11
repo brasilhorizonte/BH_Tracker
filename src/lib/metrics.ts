@@ -1,3 +1,4 @@
+import { EMPTY_FILTER_VALUE } from '../types';
 import type { BarDatum, DailyDatum, UsageEvent } from '../types';
 
 const toDayKey = (ts: string) => {
@@ -43,17 +44,26 @@ export const buildBarList = (
   events: UsageEvent[],
   key: keyof UsageEvent,
   limit = 6,
-  labelFallback = 'unknown'
+  labelFallback = 'Not set'
 ): BarDatum[] => {
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { value: number; label: string; isFallback: boolean }>();
   events.forEach((event) => {
     const raw = event[key];
-    const label = typeof raw === 'string' && raw.trim() ? raw : labelFallback;
-    counts.set(label, (counts.get(label) || 0) + 1);
+    const hasValue = typeof raw === 'string' && raw.trim();
+    const label = hasValue ? raw : labelFallback;
+    const valueKey = hasValue ? raw : EMPTY_FILTER_VALUE;
+    const entry = counts.get(valueKey) ?? { value: 0, label, isFallback: !hasValue };
+    entry.value += 1;
+    counts.set(valueKey, entry);
   });
 
   return Array.from(counts.entries())
-    .map(([label, value]) => ({ label, value }))
+    .map(([valueKey, entry]) => ({
+      key: valueKey,
+      label: entry.label,
+      value: entry.value,
+      isFallback: entry.isFallback,
+    }))
     .sort((a, b) => b.value - a.value)
     .slice(0, limit);
 };
@@ -62,18 +72,27 @@ export const buildDistinctUserBarList = (
   events: UsageEvent[],
   key: keyof UsageEvent,
   limit = 6,
-  labelFallback = 'unknown'
+  labelFallback = 'Not set'
 ): BarDatum[] => {
-  const map = new Map<string, Set<string>>();
+  const map = new Map<string, { label: string; users: Set<string>; isFallback: boolean }>();
   events.forEach((event) => {
     const raw = event[key];
-    const label = typeof raw === 'string' && raw.trim() ? raw : labelFallback;
-    if (!map.has(label)) map.set(label, new Set());
-    if (event.user_id) map.get(label)?.add(event.user_id);
+    const hasValue = typeof raw === 'string' && raw.trim();
+    const label = hasValue ? raw : labelFallback;
+    const valueKey = hasValue ? raw : EMPTY_FILTER_VALUE;
+    if (!map.has(valueKey)) {
+      map.set(valueKey, { label, users: new Set(), isFallback: !hasValue });
+    }
+    if (event.user_id) map.get(valueKey)?.users.add(event.user_id);
   });
 
   return Array.from(map.entries())
-    .map(([label, set]) => ({ label, value: set.size }))
+    .map(([valueKey, entry]) => ({
+      key: valueKey,
+      label: entry.label,
+      value: entry.users.size,
+      isFallback: entry.isFallback,
+    }))
     .sort((a, b) => b.value - a.value)
     .slice(0, limit);
 };

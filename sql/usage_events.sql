@@ -42,6 +42,39 @@ create index if not exists usage_events_route_idx on public.usage_events (route)
 create index if not exists usage_events_event_ts_event_name_idx on public.usage_events (event_ts desc, event_name);
 create index if not exists usage_events_properties_gin_idx on public.usage_events using gin (properties);
 
+-- Normalize AI module event names on insert (analysis_run -> qualitativo_run/valuai_run).
+create or replace function public.normalize_ai_event_name(event_name text, feature text)
+returns text
+language sql
+immutable
+as $$
+  select case
+    when event_name = 'analysis_run'
+      and lower(coalesce(feature, '')) in ('qualitativo', 'qualitativo_ai')
+      then 'qualitativo_run'
+    when event_name = 'analysis_run'
+      and lower(coalesce(feature, '')) in ('valuai', 'valuai_ai')
+      then 'valuai_run'
+    else event_name
+  end;
+$$;
+
+create or replace function public.usage_events_normalize_event_name()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.event_name := public.normalize_ai_event_name(new.event_name, new.feature);
+  return new;
+end;
+$$;
+
+drop trigger if exists usage_events_normalize_event_name on public.usage_events;
+create trigger usage_events_normalize_event_name
+before insert on public.usage_events
+for each row
+execute function public.usage_events_normalize_event_name();
+
 -- Optional helper: admin check backed by profiles table.
 -- Remove this if you already have public.is_admin.
 -- Keep default auth.uid() to avoid altering existing signature defaults.
