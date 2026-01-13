@@ -517,7 +517,7 @@ const buildUrlFilterOptions = (
   const values = getUniqueValues(events, eventKey);
   const hasEmpty = values[0] === EMPTY_FILTER_VALUE;
   const baseValues = hasEmpty ? values.slice(1) : values;
-  const set = new Set(baseValues);
+  const set = new Set(baseValues.filter((value) => !isLovableValue(value)));
   presets.forEach((preset) => {
     if (preset) set.add(preset);
   });
