@@ -565,6 +565,13 @@ button, input, select {
   font-size: 14px;
 }
 
+.bar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bar-item-button {
   background: transparent;
   border: 1px solid transparent;

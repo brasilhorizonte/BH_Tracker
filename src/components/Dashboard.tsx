@@ -11,7 +11,7 @@ import {
   extractTopProperty,
   filterByDateRange,
 } from '../lib/metrics';
-import { EMPTY_FILTER_VALUE } from '../types';
+import { EMPTY_FILTER_VALUE, LOVABLE_FILTER_VALUE } from '../types';
 import type { BarDatum, DateRange, Filters, UsageEvent } from '../types';
 
 const formatNumber = (value: number) =>
@@ -35,7 +35,69 @@ const formatTimestamp = (value: Date | null) => {
   return value.toLocaleString();
 };
 
-const formatFilterValue = (value: string) => (value === EMPTY_FILTER_VALUE ? 'Not set' : value);
+const formatFilterValue = (value: string) => {
+  if (value === EMPTY_FILTER_VALUE) return 'Not set';
+  if (value === LOVABLE_FILTER_VALUE) return LOVABLE_LABEL;
+  return value;
+};
+
+const shortenLabel = (value: string, maxLength = MAX_URL_LABEL_LENGTH) => {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
+};
+
+const parseUrlParts = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed || !/[./]/.test(trimmed)) return null;
+  const hasScheme = /^https?:\/\//i.test(trimmed);
+  const candidate = hasScheme ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(candidate);
+    return {
+      host: url.hostname.replace(/^www\./i, ''),
+      path: url.pathname,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const formatUrlLabel = (value: string) => {
+  const parts = parseUrlParts(value);
+  let label = value.trim();
+  if (parts) {
+    const segments = parts.path.split('/').filter(Boolean);
+    if (!segments.length) {
+      label = parts.host;
+    } else if (segments.length === 1) {
+      label = `${parts.host}/${segments[0]}`;
+    } else {
+      label = `${parts.host}/${segments[0]}/...`;
+    }
+  } else {
+    label = label.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+    label = label.split(/[?#]/)[0];
+  }
+  return shortenLabel(label);
+};
+
+const isLovableValue = (value: string) => {
+  const lower = value.toLowerCase();
+  const parts = parseUrlParts(value);
+  if (parts?.host) return parts.host.includes('lovable');
+  return lower.includes('lovable');
+};
+
+const formatFilterValueByKey = (key: keyof Filters, value: string) => {
+  if (value === LOVABLE_FILTER_VALUE) return LOVABLE_LABEL;
+  if (value === EMPTY_FILTER_VALUE) {
+    if (key === 'referrer') return DIRECT_LABEL;
+    if (key === 'landingPage') return UNKNOWN_LABEL;
+    return 'Not set';
+  }
+  if (key === 'referrer' || key === 'landingPage') return formatUrlLabel(value);
+  return value;
+};
 
 const toDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -112,6 +174,12 @@ const AI_FEATURE_ALIASES: Record<string, string> = {
   valuai_ai: 'valuai',
 };
 const LOGIN_EVENT_NAME = 'login';
+const DIRECT_LABEL = 'Direct';
+const UNKNOWN_LABEL = 'Unknown';
+const LOVABLE_LABEL = 'Lovable';
+const MAX_URL_LABEL_LENGTH = 42;
+const REFERRER_PRESETS = ['instagram', 'twitter', 'reddit'];
+const REFERRER_LIST_LIMIT = 10;
 
 const normalizeAiFeature = (feature: string | null) => {
   if (!feature) return null;
@@ -391,6 +459,77 @@ const getUniqueValues = (events: UsageEvent[], key: keyof UsageEvent) => {
   return values;
 };
 
+const buildUrlBarList = (
+  events: UsageEvent[],
+  key: 'referrer' | 'landing_page',
+  limit: number,
+  emptyLabel: string
+): BarDatum[] => {
+  const counts = new Map<string, { value: number; label: string; title: string; isFallback: boolean }>();
+  events.forEach((event) => {
+    const raw = event[key];
+    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+    let valueKey = EMPTY_FILTER_VALUE;
+    let label = emptyLabel;
+    let title = emptyLabel;
+    let isFallback = true;
+
+    if (trimmed) {
+      if (isLovableValue(trimmed)) {
+        valueKey = LOVABLE_FILTER_VALUE;
+        label = LOVABLE_LABEL;
+        title = LOVABLE_LABEL;
+        isFallback = false;
+      } else {
+        valueKey = trimmed;
+        label = formatUrlLabel(trimmed);
+        title = trimmed;
+        isFallback = false;
+      }
+    }
+
+    const entry = counts.get(valueKey);
+    if (entry) {
+      entry.value += 1;
+      return;
+    }
+    counts.set(valueKey, { value: 1, label, title, isFallback });
+  });
+
+  return Array.from(counts.entries())
+    .map(([valueKey, entry]) => ({
+      key: valueKey,
+      label: entry.label,
+      title: entry.title,
+      value: entry.value,
+      isFallback: entry.isFallback,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+};
+
+const buildUrlFilterOptions = (
+  events: UsageEvent[],
+  eventKey: 'referrer' | 'landing_page',
+  filterKey: 'referrer' | 'landingPage',
+  presets: string[] = []
+) => {
+  const values = getUniqueValues(events, eventKey);
+  const hasEmpty = values[0] === EMPTY_FILTER_VALUE;
+  const baseValues = hasEmpty ? values.slice(1) : values;
+  const set = new Set(baseValues);
+  presets.forEach((preset) => {
+    if (preset) set.add(preset);
+  });
+  if (baseValues.some((value) => isLovableValue(value))) {
+    set.add(LOVABLE_FILTER_VALUE);
+  }
+  const sorted = Array.from(set).sort((a, b) =>
+    formatFilterValueByKey(filterKey, a).localeCompare(formatFilterValueByKey(filterKey, b))
+  );
+  return hasEmpty ? [EMPTY_FILTER_VALUE, ...sorted] : sorted;
+};
+
 const buildEventOptions = (events: UsageEvent[]) => getUniqueValues(events, 'event_name');
 
 const buildFilterLabel = (value: string) => (value ? formatFilterValue(value) : 'All');
@@ -538,7 +677,9 @@ const BarList = ({
                 onClick={() => onSelect?.(valueKey)}
                 aria-pressed={isActive}
               >
-                <div title={item.label}>{item.label}</div>
+                <div className="bar-label" title={item.title ?? item.label}>
+                  {item.label}
+                </div>
                 <div className="bar-track">
                   <div className="bar-fill" style={{ width: `${(item.value / max) * 100}%` }} />
                 </div>
@@ -548,7 +689,9 @@ const BarList = ({
           }
           return (
             <div key={valueKey} className="bar-item">
-              <div title={item.label}>{item.label}</div>
+              <div className="bar-label" title={item.title ?? item.label}>
+                {item.label}
+              </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(item.value / max) * 100}%` }} />
               </div>
@@ -912,7 +1055,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.referrer.map((option) => (
             <option key={option} value={option}>
-              {formatFilterValue(option)}
+              {formatFilterValueByKey('referrer', option)}
             </option>
           ))}
         </select>
@@ -923,7 +1066,7 @@ const FiltersPanel = ({
           <option value="">All</option>
           {options.landingPage.map((option) => (
             <option key={option} value={option}>
-              {formatFilterValue(option)}
+              {formatFilterValueByKey('landingPage', option)}
             </option>
           ))}
         </select>
@@ -1128,8 +1271,8 @@ export default function Dashboard() {
   const utmCampaigns = buildBarList(events, 'utm_campaign', 5);
   const utmTerms = buildBarList(events, 'utm_term', 5);
   const utmContents = buildBarList(events, 'utm_content', 5);
-  const referrers = buildBarList(events, 'referrer', 5);
-  const landingPages = buildBarList(events, 'landing_page', 5);
+  const referrers = buildUrlBarList(events, 'referrer', REFERRER_LIST_LIMIT, DIRECT_LABEL);
+  const landingPages = buildUrlBarList(events, 'landing_page', 5, UNKNOWN_LABEL);
   const errorCodes = extractTopProperty(events, 'error_code', 5);
 
   const contentEvents = events.filter((event) => CONTENT_EVENT_NAMES.includes(event.event_name));
@@ -1159,8 +1302,8 @@ export default function Dashboard() {
       deviceType: getUniqueValues(events, 'device_type'),
       os: getUniqueValues(events, 'os'),
       browser: getUniqueValues(events, 'browser'),
-      referrer: getUniqueValues(events, 'referrer'),
-      landingPage: getUniqueValues(events, 'landing_page'),
+      referrer: buildUrlFilterOptions(events, 'referrer', 'referrer', REFERRER_PRESETS),
+      landingPage: buildUrlFilterOptions(events, 'landing_page', 'landingPage'),
       utmSource: getUniqueValues(events, 'utm_source'),
       utmMedium: getUniqueValues(events, 'utm_medium'),
       utmCampaign: getUniqueValues(events, 'utm_campaign'),
@@ -1177,7 +1320,7 @@ export default function Dashboard() {
         .map(([key, value]) => ({
           key,
           label: FILTER_LABELS[key],
-          value: formatFilterValue(value),
+          value: formatFilterValueByKey(key, value),
         })),
     [filters]
   );

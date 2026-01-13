@@ -53,12 +53,14 @@ export type Filters = {
 };
 
 export const EMPTY_FILTER_VALUE = '__empty__';
+export const LOVABLE_FILTER_VALUE = '__lovable__';
 
 export type BarDatum = {
   label: string;
   value: number;
   key?: string;
   isFallback?: boolean;
+  title?: string;
 };
 
 export type DailyDatum = {

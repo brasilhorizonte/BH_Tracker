@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSupabaseClient, hasSupabaseConfig } from '../lib/supabase';
-import { EMPTY_FILTER_VALUE } from '../types';
+import { EMPTY_FILTER_VALUE, LOVABLE_FILTER_VALUE } from '../types';
 import type { DateRange, Filters, UsageEvent } from '../types';
 
 const SELECT_FIELDS = [
@@ -43,6 +43,12 @@ const applyFilter = (query: any, column: string, value: string) => {
   return query.eq(column, value);
 };
 
+const applyLovableFilter = (query: any, column: string, value: string) => {
+  if (!value) return query;
+  if (value === LOVABLE_FILTER_VALUE) return query.ilike(column, '%lovable%');
+  return applyFilter(query, column, value);
+};
+
 const applyFilters = (query: any, filters: Filters) => {
   query = applyFilter(query, 'plan', filters.plan);
   query = applyFilter(query, 'subscription_status', filters.subscriptionStatus);
@@ -55,8 +61,8 @@ const applyFilters = (query: any, filters: Filters) => {
   query = applyFilter(query, 'device_type', filters.deviceType);
   query = applyFilter(query, 'os', filters.os);
   query = applyFilter(query, 'browser', filters.browser);
-  query = applyFilter(query, 'referrer', filters.referrer);
-  query = applyFilter(query, 'landing_page', filters.landingPage);
+  query = applyLovableFilter(query, 'referrer', filters.referrer);
+  query = applyLovableFilter(query, 'landing_page', filters.landingPage);
   query = applyFilter(query, 'utm_source', filters.utmSource);
   query = applyFilter(query, 'utm_medium', filters.utmMedium);
   query = applyFilter(query, 'utm_campaign', filters.utmCampaign);
