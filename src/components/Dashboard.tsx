@@ -707,6 +707,56 @@ const BarList = ({
   );
 };
 
+const UtmCard = ({
+  items,
+  onSelect,
+}: {
+  items: { key: keyof Filters; label: string; data: BarDatum[]; activeValue: string }[];
+  onSelect: (key: keyof Filters, value: string) => void;
+}) => (
+  <div className="section-card">
+    <div className="section-subtitle">UTM parameters</div>
+    <div className="utm-grid">
+      {items.map((item) => {
+        const max = Math.max(...item.data.map((datum) => datum.value), 1);
+        return (
+          <div key={item.key} className="utm-block">
+            <div className="utm-title">{item.label}</div>
+            <div className="bar-list">
+              {item.data.length ? (
+                item.data.map((datum) => {
+                  const valueKey = datum.key ?? datum.label;
+                  const isActive = item.activeValue === valueKey;
+                  return (
+                    <button
+                      key={valueKey}
+                      className={`bar-item bar-item-button${isActive ? ' is-active' : ''}`}
+                      type="button"
+                      onClick={() => onSelect(item.key, valueKey)}
+                      aria-pressed={isActive}
+                    >
+                      <div className="bar-label" title={datum.title ?? datum.label}>
+                        {datum.label}
+                      </div>
+                      <div className="bar-track">
+                        <div className="bar-fill" style={{ width: `${(datum.value / max) * 100}%` }} />
+                      </div>
+                      <div>{formatNumber(datum.value)}</div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="utm-empty">No data</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+    <div className="bar-hint">Click a row to filter by UTM field.</div>
+  </div>
+);
+
 const MetricCard = ({
   label,
   value,
@@ -1975,40 +2025,15 @@ export default function Dashboard() {
             activeValue={filters.referrer}
             filterLabel="referrer"
           />
-          <BarList
-            title="UTM source"
-            data={utmSources}
-            onSelect={(value) => handleFilterSelect('utmSource', value)}
-            activeValue={filters.utmSource}
-            filterLabel="UTM source"
-          />
-          <BarList
-            title="UTM medium"
-            data={utmMediums}
-            onSelect={(value) => handleFilterSelect('utmMedium', value)}
-            activeValue={filters.utmMedium}
-            filterLabel="UTM medium"
-          />
-          <BarList
-            title="UTM campaign"
-            data={utmCampaigns}
-            onSelect={(value) => handleFilterSelect('utmCampaign', value)}
-            activeValue={filters.utmCampaign}
-            filterLabel="UTM campaign"
-          />
-          <BarList
-            title="UTM term"
-            data={utmTerms}
-            onSelect={(value) => handleFilterSelect('utmTerm', value)}
-            activeValue={filters.utmTerm}
-            filterLabel="UTM term"
-          />
-          <BarList
-            title="UTM content"
-            data={utmContents}
-            onSelect={(value) => handleFilterSelect('utmContent', value)}
-            activeValue={filters.utmContent}
-            filterLabel="UTM content"
+          <UtmCard
+            items={[
+              { key: 'utmSource', label: 'Source', data: utmSources, activeValue: filters.utmSource },
+              { key: 'utmMedium', label: 'Medium', data: utmMediums, activeValue: filters.utmMedium },
+              { key: 'utmCampaign', label: 'Campaign', data: utmCampaigns, activeValue: filters.utmCampaign },
+              { key: 'utmTerm', label: 'Term', data: utmTerms, activeValue: filters.utmTerm },
+              { key: 'utmContent', label: 'Content', data: utmContents, activeValue: filters.utmContent },
+            ]}
+            onSelect={handleFilterSelect}
           />
         </div>
 
