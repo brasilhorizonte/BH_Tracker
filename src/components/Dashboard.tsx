@@ -1304,6 +1304,11 @@ export default function Dashboard() {
   const successRate = computeSuccessRate(events).successRate;
   const errorRate = computeSuccessRate(events).errorRate;
   const avgLatency = extractNumericProperty(events, 'latency_ms');
+  const errorEvents = useMemo(() => events.filter((event) => event.success === false), [events]);
+  const errorEventCounts = buildBarList(errorEvents, 'event_name', 6);
+  const errorRouteCounts = buildBarList(errorEvents, 'route', 6);
+  const errorActionCounts = buildBarList(errorEvents, 'action', 5);
+  const errorFeatureCounts = buildBarList(errorEvents, 'feature', 6);
 
   const featureUsage = buildDistinctUserBarList(events, 'feature', 6);
   const planUsage = buildDistinctUserBarList(events, 'plan', 6);
@@ -1861,6 +1866,47 @@ export default function Dashboard() {
           </div>
         </div>
 
+        <div style={{ marginTop: '28px' }}>
+          <div className="section-title">Errors</div>
+          <div className="section-subtitle">Top failure clusters by event, route, feature, action</div>
+        </div>
+        {errorEvents.length ? (
+          <div className="section-grid" style={{ marginTop: '12px' }}>
+            <BarList
+              title="Top error events"
+              data={errorEventCounts}
+              onSelect={(value) => handleFilterSelect('eventName', value)}
+              activeValue={filters.eventName}
+              filterLabel="event"
+            />
+            <BarList
+              title="Top error routes"
+              data={errorRouteCounts}
+              onSelect={(value) => handleFilterSelect('route', value)}
+              activeValue={filters.route}
+              filterLabel="route"
+            />
+            <BarList
+              title="Top error features"
+              data={errorFeatureCounts}
+              onSelect={(value) => handleFilterSelect('feature', value)}
+              activeValue={filters.feature}
+              filterLabel="feature"
+            />
+            <BarList
+              title="Top error actions"
+              data={errorActionCounts}
+              onSelect={(value) => handleFilterSelect('action', value)}
+              activeValue={filters.action}
+              filterLabel="action"
+            />
+          </div>
+        ) : (
+          <div className="section-card" style={{ marginTop: '12px' }}>
+            <div className="focus-empty">No error events in this range.</div>
+          </div>
+        )}
+
         <div className="section-card" style={{ marginTop: '20px' }}>
           <div className="section-title">Product trends</div>
           <div className="section-subtitle">Content and AI usage</div>
@@ -2082,6 +2128,10 @@ export default function Dashboard() {
                 <tr>
                   <td>Error rate</td>
                   <td>{formatPercent(errorRate)}</td>
+                </tr>
+                <tr>
+                  <td>Error events</td>
+                  <td>{formatNumber(errorEvents.length)}</td>
                 </tr>
                 <tr>
                   <td>Paywall rate</td>
