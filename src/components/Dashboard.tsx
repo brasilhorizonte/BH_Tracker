@@ -123,6 +123,12 @@ type DailyBucket = {
   errorEvents: number;
 };
 
+type UsageDailyBucket = {
+  users: Set<string>;
+  sessions: Set<string>;
+  extraCount: number;
+};
+
 type ExpandedChart = {
   title: string;
   subtitle?: string;
@@ -158,6 +164,25 @@ const buildPresetRange = (days: number): DateRange => {
 };
 
 const CONTENT_EVENT_NAMES = ['report_view', 'report_download', 'content_view', 'content_download'];
+const USAGE_EVENT_NAMES = new Set([
+  ...CONTENT_EVENT_NAMES,
+  'analysis_run',
+  'qualitativo_run',
+  'valuai_run',
+  'validator_run',
+  'portfolio_create',
+  'portfolio_update',
+  'portfolio_delete',
+  'portfolio_simulate',
+  'portfolio_export',
+  'optimizer_run',
+  'compare_add',
+  'compare_remove',
+  'watchlist_add',
+  'watchlist_remove',
+  'search_run',
+  'filter_apply',
+]);
 const AI_MODULE_DEFS = [
   { key: 'analysis_run', label: 'Analysis', accent: '#f4a259' },
   { key: 'validator_run', label: 'Validator', accent: '#5db7a5' },
@@ -174,6 +199,7 @@ const AI_FEATURE_ALIASES: Record<string, string> = {
   valuai_ai: 'valuai',
 };
 const LOGIN_EVENT_NAME = 'login';
+const LONG_LOGIN_THRESHOLD_MS = 20 * 60 * 1000;
 const DIRECT_LABEL = 'Direct';
 const UNKNOWN_LABEL = 'Unknown';
 const LOVABLE_LABEL = 'Lovable';
@@ -203,6 +229,44 @@ const isAiEvent = (event: UsageEvent) => getAiModuleKey(event) !== null;
 
 const isLoginSuccess = (event: UsageEvent) =>
   event.event_name === LOGIN_EVENT_NAME && (event.action === 'success' || event.success === true);
+
+const getSessionDurationMs = (event: UsageEvent) => {
+  const properties = event.properties as Record<string, unknown> | null;
+  if (!properties) return null;
+  const durationMs = properties.duration_ms;
+  if (typeof durationMs === 'number' && Number.isFinite(durationMs)) return durationMs;
+  return null;
+};
+
+const isUsageToolEvent = (event: UsageEvent) => {
+  if (!USAGE_EVENT_NAMES.has(event.event_name)) return false;
+  if (event.action) return event.action === 'success';
+  if (event.success === false) return false;
+  return true;
+};
+
+const collectLongLoginSessions = (events: UsageEvent[]) => {
+  const loginSessions = new Set<string>();
+  events.forEach((event) => {
+    if (!event.session_id || !event.user_id) return;
+    if (isLoginSuccess(event)) {
+      loginSessions.add(event.session_id);
+    }
+  });
+
+  const longSessions = new Set<string>();
+  events.forEach((event) => {
+    if (event.event_name !== 'session_end') return;
+    if (!event.session_id || !event.user_id) return;
+    if (!loginSessions.has(event.session_id)) return;
+    const durationMs = getSessionDurationMs(event);
+    if (durationMs !== null && durationMs >= LONG_LOGIN_THRESHOLD_MS) {
+      longSessions.add(event.session_id);
+    }
+  });
+
+  return longSessions;
+};
 
 const buildDailyBuckets = (events: UsageEvent[], range: DateRange): DailyBucket[] => {
   const contentEventNames = new Set(CONTENT_EVENT_NAMES);
@@ -267,8 +331,136 @@ const buildDailyBuckets = (events: UsageEvent[], range: DateRange): DailyBucket[
   return buckets;
 };
 
+const buildUsageStats = (events: UsageEvent[]) => {
+  const longLoginSessions = collectLongLoginSessions(events);
+  const dailyUsage = new Map<string, UsageDailyBucket>();
+  const usageUsers = new Set<string>();
+  const usageDaysByUser = new Map<string, Set<string>>();
+  const usageSessionsByUser = new Map<string, Set<string>>();
+  const usageExtraByUser = new Map<string, number>();
+
+  const ensureUsageBucket = (day: string) => {
+    if (!dailyUsage.has(day)) {
+      dailyUsage.set(day, { users: new Set(), sessions: new Set(), extraCount: 0 });
+    }
+    return dailyUsage.get(day) as UsageDailyBucket;
+  };
+
+  events.forEach((event) => {
+    if (!event.user_id) return;
+    const isToolUsage = isUsageToolEvent(event);
+    const isLongLogin =
+      event.event_name === 'session_end' &&
+      event.session_id &&
+      longLoginSessions.has(event.session_id);
+    if (!isToolUsage && !isLongLogin) return;
+
+    const time = new Date(event.event_ts);
+    if (Number.isNaN(time.getTime())) return;
+    const day = toDayKey(time);
+    const bucket = ensureUsageBucket(day);
+
+    usageUsers.add(event.user_id);
+    bucket.users.add(event.user_id);
+
+    const userDays = usageDaysByUser.get(event.user_id) ?? new Set<string>();
+    userDays.add(day);
+    usageDaysByUser.set(event.user_id, userDays);
+
+    if (event.session_id) {
+      bucket.sessions.add(event.session_id);
+      const userSessions = usageSessionsByUser.get(event.user_id) ?? new Set<string>();
+      userSessions.add(event.session_id);
+      usageSessionsByUser.set(event.user_id, userSessions);
+    } else {
+      bucket.extraCount += 1;
+      usageExtraByUser.set(event.user_id, (usageExtraByUser.get(event.user_id) ?? 0) + 1);
+    }
+  });
+
+  let usageCountTotal = 0;
+  usageUsers.forEach((userId) => {
+    const sessionCount = usageSessionsByUser.get(userId)?.size ?? 0;
+    const extraCount = usageExtraByUser.get(userId) ?? 0;
+    usageCountTotal += sessionCount + extraCount;
+  });
+
+  return {
+    dailyUsage,
+    usageUsers,
+    usageCountTotal,
+    usageDaysByUser,
+  };
+};
+
 const buildSeries = (buckets: DailyBucket[], accessor: (bucket: DailyBucket) => number) =>
   buckets.map((bucket) => ({ label: bucket.day, value: accessor(bucket) }));
+
+const buildUsageSeries = (
+  buckets: DailyBucket[],
+  usageByDay: Map<string, UsageDailyBucket>,
+  accessor: (bucket: UsageDailyBucket) => number
+) =>
+  buckets.map((bucket) => {
+    const usageBucket = usageByDay.get(bucket.day);
+    return { label: bucket.day, value: usageBucket ? accessor(usageBucket) : 0 };
+  });
+
+const buildRetentionStats = (
+  usageDaysByUser: Map<string, Set<string>>,
+  rangeEnd: string,
+  windowDays: number
+) => {
+  const endDate = new Date(`${rangeEnd}T00:00:00.000Z`);
+  if (Number.isNaN(endDate.getTime())) {
+    return { rate: null, eligible: 0, retained: 0, series: [] as { label: string; value: number }[] };
+  }
+
+  const cohortStats = new Map<string, { total: number; retained: number }>();
+  let eligible = 0;
+  let retained = 0;
+
+  const getFirstDay = (days: Set<string>) => {
+    let first: string | null = null;
+    days.forEach((day) => {
+      if (!first || day < first) first = day;
+    });
+    return first;
+  };
+
+  usageDaysByUser.forEach((days) => {
+    const firstDay = getFirstDay(days);
+    if (!firstDay) return;
+    const cohortDate = new Date(`${firstDay}T00:00:00.000Z`);
+    if (Number.isNaN(cohortDate.getTime())) return;
+    const targetDate = addDays(cohortDate, windowDays);
+    if (targetDate.getTime() > endDate.getTime()) return;
+
+    eligible += 1;
+    const targetKey = toDayKey(targetDate);
+    const isRetained = days.has(targetKey);
+    if (isRetained) retained += 1;
+
+    const entry = cohortStats.get(firstDay) ?? { total: 0, retained: 0 };
+    entry.total += 1;
+    if (isRetained) entry.retained += 1;
+    cohortStats.set(firstDay, entry);
+  });
+
+  const series = Array.from(cohortStats.entries())
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([day, entry]) => ({
+      label: day,
+      value: entry.total > 0 ? entry.retained / entry.total : 0,
+    }));
+
+  return {
+    rate: eligible > 0 ? retained / eligible : null,
+    eligible,
+    retained,
+    series,
+  };
+};
 
 const buildRollingUsersSeries = (buckets: DailyBucket[], windowDays: number) => {
   return buckets.map((bucket, index) => {
@@ -1273,6 +1465,43 @@ export default function Dashboard() {
     [events, range]
   );
   const aiProductSeries = useMemo(() => buildAiProductSeries(events, range), [events, range]);
+  const usageStats = useMemo(() => buildUsageStats(events), [events]);
+  const usageUserCount = usageStats.usageUsers.size;
+  const usageCountTotal = usageStats.usageCountTotal;
+  const usagePerUser = safeDivide(usageCountTotal, usageUserCount);
+  const dailyUsageUsersSeries = useMemo(
+    () => buildUsageSeries(dailyBuckets, usageStats.dailyUsage, (bucket) => bucket.users.size),
+    [dailyBuckets, usageStats]
+  );
+  const dailyUsageCountSeries = useMemo(
+    () =>
+      buildUsageSeries(
+        dailyBuckets,
+        usageStats.dailyUsage,
+        (bucket) => bucket.sessions.size + bucket.extraCount
+      ),
+    [dailyBuckets, usageStats]
+  );
+  const dailyUsagePerUserSeries = useMemo(
+    () =>
+      dailyUsageCountSeries.map((entry, index) => ({
+        label: entry.label,
+        value: safeDivide(entry.value, dailyUsageUsersSeries[index]?.value ?? 0),
+      })),
+    [dailyUsageCountSeries, dailyUsageUsersSeries]
+  );
+  const retentionD1 = useMemo(
+    () => buildRetentionStats(usageStats.usageDaysByUser, range.end, 1),
+    [usageStats, range.end]
+  );
+  const retentionD7 = useMemo(
+    () => buildRetentionStats(usageStats.usageDaysByUser, range.end, 7),
+    [usageStats, range.end]
+  );
+  const retentionD30 = useMemo(
+    () => buildRetentionStats(usageStats.usageDaysByUser, range.end, 30),
+    [usageStats, range.end]
+  );
 
   const endDate = useMemo(() => new Date(`${range.end}T23:59:59.999Z`), [range.end]);
   const rangeStartDate = useMemo(() => new Date(`${range.start}T00:00:00.000Z`), [range.start]);
@@ -1805,6 +2034,71 @@ export default function Dashboard() {
               onExpand={openChart}
               onFocus={setFocusPoint}
               formatValue={formatDecimal}
+            />
+          </div>
+        </div>
+
+        <div className="section-card" style={{ marginTop: '20px' }}>
+          <div className="section-title">Usage & retention</div>
+          <div className="section-subtitle">
+            Qualified usage = tool/report success or login session &gt;= 20 minutes. Cohorts start on first qualified
+            usage in range.
+          </div>
+          <div className="metric-grid">
+            <MetricCard
+              label="Usage users"
+              value={formatNumber(usageUserCount)}
+              hint="Distinct users with qualified usage"
+              series={dailyUsageUsersSeries}
+              accent="#5db7a5"
+              onExpand={openChart}
+              onFocus={setFocusPoint}
+            />
+            <MetricCard
+              label="Usage count"
+              value={formatNumber(usageCountTotal)}
+              hint="Tool/report success or login &gt;= 20m"
+              series={dailyUsageCountSeries}
+              accent="#f4a259"
+              onExpand={openChart}
+              onFocus={setFocusPoint}
+            />
+            <MetricCard
+              label="Usage/User"
+              value={usagePerUser.toFixed(2)}
+              hint="Avg qualified uses per user"
+              series={dailyUsagePerUserSeries}
+              accent="#f28f79"
+              onExpand={openChart}
+              onFocus={setFocusPoint}
+              formatValue={formatDecimal}
+            />
+            <MetricCard
+              label="Retention D1"
+              value={formatPercent(retentionD1.rate)}
+              hint={`Cohort size: ${formatNumber(retentionD1.eligible)}`}
+              series={retentionD1.series}
+              accent="#5db7a5"
+              onExpand={openChart}
+              formatValue={(value) => formatPercent(value)}
+            />
+            <MetricCard
+              label="Retention D7"
+              value={formatPercent(retentionD7.rate)}
+              hint={`Cohort size: ${formatNumber(retentionD7.eligible)}`}
+              series={retentionD7.series}
+              accent="#f4a259"
+              onExpand={openChart}
+              formatValue={(value) => formatPercent(value)}
+            />
+            <MetricCard
+              label="Retention D30"
+              value={formatPercent(retentionD30.rate)}
+              hint={`Cohort size: ${formatNumber(retentionD30.eligible)}`}
+              series={retentionD30.series}
+              accent="#f28f79"
+              onExpand={openChart}
+              formatValue={(value) => formatPercent(value)}
             />
           </div>
         </div>

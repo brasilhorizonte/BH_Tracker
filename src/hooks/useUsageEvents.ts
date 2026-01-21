@@ -95,37 +95,59 @@ export const useUsageEvents = (
       const { startIso, endIso } = toUtcRange(range);
       const pageSize = 1000;
       const maxRows = 200000;
-      let from = 0;
-      const all: UsageEvent[] = [];
+      const maxConcurrency = 4;
+      const maxPages = Math.ceil(maxRows / pageSize);
+      const pageResults: UsageEvent[][] = [];
+      let nextPage = 0;
+      let done = false;
 
-      while (true) {
+      const fetchPage = async (pageIndex: number) => {
+        const from = pageIndex * pageSize;
+        const to = Math.min(from + pageSize - 1, maxRows - 1);
+
         let query = client
           .from('usage_events')
           .select(SELECT_FIELDS)
           .gte('event_ts', startIso)
           .lte('event_ts', endIso)
           .order('event_ts', { ascending: true })
-          .range(from, from + pageSize - 1);
+          .range(from, to);
 
         query = applyFilters(query, filters);
 
         const { data, error: queryError } = await query;
-        if (queryError) {
-          setError(queryError.message || 'Failed to load events');
-          break;
-        }
-        const rows = ((data ?? []) as unknown) as UsageEvent[];
-        all.push(...rows);
+        return { data: ((data ?? []) as unknown) as UsageEvent[], error: queryError, pageIndex };
+      };
 
-        if (rows.length < pageSize) break;
-        if (all.length >= maxRows) {
-          setTruncated(true);
-          break;
+      while (!done && nextPage < maxPages && !cancelled) {
+        const batchPages: number[] = [];
+
+        while (batchPages.length < maxConcurrency && nextPage < maxPages) {
+          batchPages.push(nextPage);
+          nextPage += 1;
         }
-        from += pageSize;
+
+        const batchResults = await Promise.all(batchPages.map((pageIndex) => fetchPage(pageIndex)));
+        if (cancelled) break;
+
+        for (const result of batchResults) {
+          if (result.error) {
+            setError(result.error.message || 'Failed to load events');
+            done = true;
+            break;
+          }
+          pageResults[result.pageIndex] = result.data;
+          if (result.data.length < pageSize) {
+            done = true;
+          }
+        }
       }
 
       if (!cancelled) {
+        const all = pageResults.flat();
+        if (all.length >= maxRows) {
+          setTruncated(true);
+        }
         setEvents(all);
         setLoading(false);
       }
