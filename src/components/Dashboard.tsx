@@ -103,9 +103,14 @@ const formatFilterValueByKey = (key: keyof Filters, value: string) => {
 const pickPropertyValue = (properties: Record<string, unknown>, keys: string[]) => {
   for (const key of keys) {
     const raw = properties[key];
-    if (typeof raw !== 'string') continue;
-    const trimmed = raw.trim();
-    if (trimmed) return trimmed;
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed) return trimmed;
+      continue;
+    }
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return String(raw);
+    }
   }
   return '';
 };
