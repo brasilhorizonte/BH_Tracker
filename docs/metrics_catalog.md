@@ -42,7 +42,8 @@ This list is derived from `usage_events` and is grouped by dashboard sections.
 - Report views, downloads, unique users
 - Content views, downloads
 - Search -> content view conversion
-- Top report_id / content_id by engagement
+- Top report downloads by title (report_catalog mapping)
+- Top content downloads by title (content_name)
 
 ## AI modules
 - AI run volume by module (analysis_run, validator_run, qualitativo_run, valuai_run)

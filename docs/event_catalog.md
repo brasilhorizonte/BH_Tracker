@@ -57,10 +57,10 @@ Required in every event:
 
 | event_name | feature | action | properties (required) | properties (optional) | notes |
 | --- | --- | --- | --- | --- | --- |
-| report_view | research_reports | success | report_id | company_id, sector_id, analyst_id |  |
-| report_download | research_reports | success | report_id | company_id, sector_id, analyst_id |  |
-| content_view | research_content | success | content_id | company_id, sector_id, analyst_id |  |
-| content_download | research_content | success | content_id |  |  |
+| report_view | research_reports | success | report_id | company_id, sector_id, analyst_id, report_title | report_title optional; otherwise resolve via report_catalog |
+| report_download | research_reports | success | report_id | company_id, sector_id, analyst_id, report_title | report_title optional; otherwise resolve via report_catalog |
+| content_view | research_content | success | content_id | company_id, sector_id, analyst_id, content_name | content_name for file/video name |
+| content_download | research_content | success | content_id | content_name | content_name for file/video name |
 | filter_apply | research | success | filter_count | filters |  |
 | search_run | research | start | query |  |  |
 | search_run | research | success | query | result_count |  |

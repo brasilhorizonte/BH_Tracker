@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, TouchEvent } from 'react';
 import { useUsageEvents } from '../hooks/useUsageEvents';
+import { getSupabaseClient, hasSupabaseConfig } from '../lib/supabase';
 import {
   buildBarList,
   buildDistinctUserBarList,
@@ -99,6 +100,78 @@ const formatFilterValueByKey = (key: keyof Filters, value: string) => {
   return value;
 };
 
+const pickPropertyValue = (properties: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const raw = properties[key];
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+};
+
+type ContentListOptions = {
+  limit?: number;
+  useIdFallback?: boolean;
+  missingLabel?: string;
+  idLabelMap?: Record<string, string>;
+};
+
+const buildContentAssetList = (
+  events: UsageEvent[],
+  labelKeys: string[],
+  idKeys: string[],
+  options: ContentListOptions = {}
+): BarDatum[] => {
+  const limit = options.limit ?? 6;
+  const useIdFallback = options.useIdFallback ?? true;
+  const missingLabel = options.missingLabel ?? '';
+  const idLabelMap = options.idLabelMap ?? {};
+  const counts = new Map<string, { label: string; title: string; value: number }>();
+  events.forEach((event) => {
+    const properties = event.properties as Record<string, unknown> | null;
+    if (!properties) return;
+    const label = pickPropertyValue(properties, labelKeys);
+    const id = pickPropertyValue(properties, idKeys);
+    const mappedLabel = id && idLabelMap[id] ? idLabelMap[id].trim() : '';
+    let resolvedLabel = '';
+    let key = '';
+
+    if (label) {
+      resolvedLabel = label;
+      key = label;
+    } else if (mappedLabel) {
+      resolvedLabel = mappedLabel;
+      key = mappedLabel;
+    } else if (useIdFallback && id) {
+      resolvedLabel = id;
+      key = id;
+    } else if (missingLabel) {
+      resolvedLabel = missingLabel;
+      key = missingLabel;
+    } else {
+      return;
+    }
+
+    const entry = counts.get(key);
+    if (entry) {
+      entry.value += 1;
+      return;
+    }
+    counts.set(key, { label: resolvedLabel, title: resolvedLabel, value: 1 });
+  });
+
+  return Array.from(counts.entries())
+    .map(([key, entry]) => ({
+      key,
+      label: entry.label,
+      title: entry.title,
+      value: entry.value,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+};
+
 const toDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
 const getDefaultRange = (): DateRange => {
@@ -163,7 +236,15 @@ const buildPresetRange = (days: number): DateRange => {
   return { start: toDateKey(start), end: toDateKey(end) };
 };
 
-const CONTENT_EVENT_NAMES = ['report_view', 'report_download', 'content_view', 'content_download'];
+const REPORT_EVENT_NAMES = ['report_view', 'report_download'];
+const CONTENT_ITEM_EVENT_NAMES = ['content_view', 'content_download'];
+const REPORT_DOWNLOAD_EVENT_NAME = 'report_download';
+const CONTENT_DOWNLOAD_EVENT_NAME = 'content_download';
+const CONTENT_EVENT_NAMES = [...REPORT_EVENT_NAMES, ...CONTENT_ITEM_EVENT_NAMES];
+const REPORT_TITLE_KEYS = ['report_title', 'title'];
+const REPORT_ID_KEYS = ['report_id'];
+const CONTENT_TITLE_KEYS = ['content_name', 'content_title', 'title'];
+const CONTENT_ID_KEYS = ['content_id'];
 const USAGE_EVENT_NAMES = new Set([
   ...CONTENT_EVENT_NAMES,
   'analysis_run',
@@ -1380,8 +1461,55 @@ export default function Dashboard() {
   const wasLoading = useRef(false);
   const [expandedChart, setExpandedChart] = useState<ExpandedChart | null>(null);
   const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null);
+  const [reportCatalog, setReportCatalog] = useState<Record<string, string>>({});
 
   const { events, loading, error, truncated } = useUsageEvents(range, filters, true, refreshTick);
+
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!hasSupabaseConfig || !client) return;
+    let cancelled = false;
+
+    const fetchReportCatalog = async () => {
+      const pageSize = 1000;
+      const rows: { report_id: string | null; report_title: string | null }[] = [];
+      let from = 0;
+
+      while (!cancelled) {
+        const { data, error: queryError } = await client
+          .from('report_catalog')
+          .select('report_id, report_title')
+          .range(from, from + pageSize - 1);
+
+        if (cancelled) return;
+        if (queryError) {
+          setReportCatalog({});
+          return;
+        }
+
+        const page = (data ?? []) as { report_id: string | null; report_title: string | null }[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+        from += pageSize;
+      }
+
+      if (cancelled) return;
+
+      const nextCatalog: Record<string, string> = {};
+      rows.forEach((row) => {
+        const id = typeof row.report_id === 'string' ? row.report_id.trim() : '';
+        const title = typeof row.report_title === 'string' ? row.report_title.trim() : '';
+        if (id && title) nextCatalog[id] = title;
+      });
+      setReportCatalog(nextCatalog);
+    };
+
+    fetchReportCatalog();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshTick]);
 
   useEffect(() => {
     if (wasLoading.current && !loading && !error) {
@@ -1560,6 +1688,19 @@ export default function Dashboard() {
   const errorCodes = extractTopProperty(events, 'error_code', 5);
 
   const contentEvents = events.filter((event) => CONTENT_EVENT_NAMES.includes(event.event_name));
+  const reportEvents = contentEvents.filter((event) => REPORT_EVENT_NAMES.includes(event.event_name));
+  const contentItemEvents = contentEvents.filter((event) => CONTENT_ITEM_EVENT_NAMES.includes(event.event_name));
+  const reportDownloadEvents = reportEvents.filter((event) => event.event_name === REPORT_DOWNLOAD_EVENT_NAME);
+  const contentDownloadEvents = contentItemEvents.filter((event) => event.event_name === CONTENT_DOWNLOAD_EVENT_NAME);
+  const topReportDownloads = buildContentAssetList(reportDownloadEvents, REPORT_TITLE_KEYS, REPORT_ID_KEYS, {
+    useIdFallback: false,
+    missingLabel: 'Untitled',
+    idLabelMap: reportCatalog,
+  });
+  const topContentDownloads = buildContentAssetList(contentDownloadEvents, CONTENT_TITLE_KEYS, CONTENT_ID_KEYS, {
+    useIdFallback: false,
+    missingLabel: 'Untitled',
+  });
   const aiEvents = events.filter(isAiEvent);
   const aiEventsNormalized = aiEvents.map((event) => ({
     ...event,
@@ -2577,6 +2718,10 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+        </div>
+        <div className="section-grid" style={{ marginTop: '12px' }}>
+          <BarList title="Top report downloads" data={topReportDownloads} />
+          <BarList title="Top content downloads" data={topContentDownloads} />
         </div>
 
         <div className="section-card" style={{ marginTop: '20px' }}>

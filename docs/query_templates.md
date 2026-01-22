@@ -65,3 +65,56 @@ group by 1
 order by 2 desc
 limit 10;
 ```
+
+## Report title mapping (de/para)
+
+```sql
+create table if not exists public.report_catalog (
+  report_id text primary key,
+  report_title text not null,
+  updated_at timestamptz not null default now()
+);
+```
+
+```sql
+insert into public.report_catalog (report_id, report_title)
+values
+  ('rep_123', 'Relatorio Macro - 2024'),
+  ('rep_456', 'Fundos Imobiliarios - Janeiro')
+on conflict (report_id) do update
+set report_title = excluded.report_title,
+    updated_at = now();
+```
+
+## Top report downloads (by title via mapping)
+
+```sql
+select
+  coalesce(rc.report_title, 'Untitled') as report_title,
+  count(*) as events
+from public.usage_events ue
+left join public.report_catalog rc
+  on rc.report_id = ue.properties->>'report_id'
+where ue.event_name = 'report_download'
+group by 1
+order by 2 desc
+limit 10;
+```
+
+## Top content downloads (by title)
+
+```sql
+select
+  coalesce(
+    properties->>'content_name',
+    properties->>'content_title',
+    properties->>'title',
+    'Untitled'
+  ) as content_title,
+  count(*) as events
+from public.usage_events
+where event_name = 'content_download'
+group by 1
+order by 2 desc
+limit 10;
+```
