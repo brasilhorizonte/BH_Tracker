@@ -118,3 +118,49 @@ group by 1
 order by 2 desc
 limit 10;
 ```
+
+## Research downloads report (single query)
+
+```sql
+with report_downloads as (
+  select
+    'report' as item_group,
+    'report' as content_kind,
+    coalesce(
+      nullif(ue.properties->>'report_title', ''),
+      rc.report_title,
+      'Untitled'
+    ) as title,
+    count(*) as downloads
+  from public.usage_events ue
+  left join public.report_catalog rc
+    on rc.report_id = ue.properties->>'report_id'
+  where ue.event_name = 'report_download'
+  group by 1, 2, 3
+),
+content_downloads as (
+  select
+    'content' as item_group,
+    case
+      when lower(coalesce(nullif(ue.properties->>'content_type', ''), nullif(ue.properties->>'asset_type', '')))
+        in ('video', 'video_file', 'video_content') then 'video'
+      when coalesce(ue.properties->>'file_mime', '') like 'video/%' then 'video'
+      when coalesce(ue.properties->>'content_url', '') ~* '\\.(mp4|mov|mkv|webm|avi)(\\?.*)?$' then 'video'
+      else 'file'
+    end as content_kind,
+    coalesce(
+      nullif(ue.properties->>'content_name', ''),
+      nullif(ue.properties->>'content_title', ''),
+      nullif(ue.properties->>'title', ''),
+      'Untitled'
+    ) as title,
+    count(*) as downloads
+  from public.usage_events ue
+  where ue.event_name = 'content_download'
+  group by 1, 2, 3
+)
+select * from report_downloads
+union all
+select * from content_downloads
+order by downloads desc, item_group, content_kind, title;
+```
