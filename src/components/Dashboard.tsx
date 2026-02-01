@@ -286,6 +286,21 @@ const AI_FEATURE_ALIASES: Record<string, string> = {
 };
 const LOGIN_EVENT_NAME = 'login';
 const LONG_LOGIN_THRESHOLD_MS = 20 * 60 * 1000;
+
+// Auth events
+const AUTH_LOGIN_EVENT = 'auth_login';
+const AUTH_SIGNUP_COMPLETE_EVENT = 'auth_signup_complete';
+const AUTH_LOGOUT_EVENT = 'auth_logout';
+const AUTH_PASSWORD_RESET_REQUEST_EVENT = 'auth_password_reset_request';
+const AUTH_PASSWORD_RESET_COMPLETE_EVENT = 'auth_password_reset_complete';
+
+// Billing/Conversion events
+const CHECKOUT_START_EVENT = 'checkout_start';
+const CHECKOUT_COMPLETE_EVENT = 'checkout_complete';
+const SUBSCRIPTION_START_EVENT = 'subscription_start';
+const SUBSCRIPTION_CANCEL_EVENT = 'subscription_cancel';
+const PAYMENT_SUCCEEDED_EVENT = 'payment_succeeded';
+const PAYMENT_FAILED_EVENT = 'payment_failed';
 const DIRECT_LABEL = 'Direct';
 const UNKNOWN_LABEL = 'Unknown';
 const LOVABLE_LABEL = 'Lovable';
@@ -315,6 +330,89 @@ const isAiEvent = (event: UsageEvent) => getAiModuleKey(event) !== null;
 
 const isLoginSuccess = (event: UsageEvent) =>
   event.event_name === LOGIN_EVENT_NAME && (event.action === 'success' || event.success === true);
+
+// Auth event helpers
+const isAuthLoginEvent = (event: UsageEvent) => event.event_name === AUTH_LOGIN_EVENT;
+const isAuthSignupEvent = (event: UsageEvent) => event.event_name === AUTH_SIGNUP_COMPLETE_EVENT;
+const isAuthLogoutEvent = (event: UsageEvent) => event.event_name === AUTH_LOGOUT_EVENT;
+const isAuthPasswordResetRequestEvent = (event: UsageEvent) => event.event_name === AUTH_PASSWORD_RESET_REQUEST_EVENT;
+const isAuthPasswordResetCompleteEvent = (event: UsageEvent) => event.event_name === AUTH_PASSWORD_RESET_COMPLETE_EVENT;
+
+const isAuthEvent = (event: UsageEvent) =>
+  isAuthLoginEvent(event) ||
+  isAuthSignupEvent(event) ||
+  isAuthLogoutEvent(event) ||
+  isAuthPasswordResetRequestEvent(event) ||
+  isAuthPasswordResetCompleteEvent(event);
+
+// Billing event helpers
+const isCheckoutStartEvent = (event: UsageEvent) => event.event_name === CHECKOUT_START_EVENT;
+const isCheckoutCompleteEvent = (event: UsageEvent) => event.event_name === CHECKOUT_COMPLETE_EVENT;
+const isSubscriptionStartEvent = (event: UsageEvent) => event.event_name === SUBSCRIPTION_START_EVENT;
+const isSubscriptionCancelEvent = (event: UsageEvent) => event.event_name === SUBSCRIPTION_CANCEL_EVENT;
+const isPaymentSucceededEvent = (event: UsageEvent) => event.event_name === PAYMENT_SUCCEEDED_EVENT;
+const isPaymentFailedEvent = (event: UsageEvent) => event.event_name === PAYMENT_FAILED_EVENT;
+
+const computeAuthStats = (events: UsageEvent[]) => {
+  const authEvents = events.filter(isAuthEvent);
+
+  const loginEvents = authEvents.filter(isAuthLoginEvent);
+  const loginSuccess = loginEvents.filter((e) => e.success === true);
+  const loginError = loginEvents.filter((e) => e.success === false);
+
+  const signupEvents = authEvents.filter(isAuthSignupEvent);
+  const signupSuccess = signupEvents.filter((e) => e.success === true);
+  const signupError = signupEvents.filter((e) => e.success === false);
+
+  const logoutEvents = authEvents.filter(isAuthLogoutEvent);
+  const passwordResetRequestEvents = authEvents.filter(isAuthPasswordResetRequestEvent);
+  const passwordResetCompleteEvents = authEvents.filter(isAuthPasswordResetCompleteEvent);
+
+  const loginSuccessRate = loginEvents.length > 0 ? loginSuccess.length / loginEvents.length : null;
+  const signupSuccessRate = signupEvents.length > 0 ? signupSuccess.length / signupEvents.length : null;
+
+  return {
+    loginTotal: loginEvents.length,
+    loginSuccess: loginSuccess.length,
+    loginError: loginError.length,
+    loginSuccessRate,
+    signupTotal: signupEvents.length,
+    signupSuccess: signupSuccess.length,
+    signupError: signupError.length,
+    signupSuccessRate,
+    logoutTotal: logoutEvents.length,
+    passwordResetRequestTotal: passwordResetRequestEvents.length,
+    passwordResetCompleteTotal: passwordResetCompleteEvents.length,
+  };
+};
+
+const computeConversionStats = (events: UsageEvent[]) => {
+  const checkoutStartEvents = events.filter(isCheckoutStartEvent);
+  const checkoutCompleteEvents = events.filter(isCheckoutCompleteEvent);
+  const subscriptionStartEvents = events.filter(isSubscriptionStartEvent);
+  const subscriptionCancelEvents = events.filter(isSubscriptionCancelEvent);
+  const paymentSucceededEvents = events.filter(isPaymentSucceededEvent);
+  const paymentFailedEvents = events.filter(isPaymentFailedEvent);
+
+  const checkoutConversionRate = checkoutStartEvents.length > 0
+    ? checkoutCompleteEvents.length / checkoutStartEvents.length
+    : null;
+
+  const paymentSuccessRate = (paymentSucceededEvents.length + paymentFailedEvents.length) > 0
+    ? paymentSucceededEvents.length / (paymentSucceededEvents.length + paymentFailedEvents.length)
+    : null;
+
+  return {
+    checkoutStartTotal: checkoutStartEvents.length,
+    checkoutCompleteTotal: checkoutCompleteEvents.length,
+    checkoutConversionRate,
+    subscriptionStartTotal: subscriptionStartEvents.length,
+    subscriptionCancelTotal: subscriptionCancelEvents.length,
+    paymentSucceededTotal: paymentSucceededEvents.length,
+    paymentFailedTotal: paymentFailedEvents.length,
+    paymentSuccessRate,
+  };
+};
 
 const getSessionDurationMs = (event: UsageEvent) => {
   const properties = event.properties as Record<string, unknown> | null;
@@ -571,8 +669,10 @@ const formatDeltaPoints = (delta: number | null) =>
 
 const formatSignedNumber = (value: number) => `${value >= 0 ? '+' : '-'}${formatNumber(Math.abs(value))}`;
 
-const findPeak = (buckets: DailyBucket[], accessor: (bucket: DailyBucket) => number) => {
-  let best: { day: string; value: number } | null = null;
+type DayValue = { day: string; value: number };
+
+const findPeak = (buckets: DailyBucket[], accessor: (bucket: DailyBucket) => number): DayValue | null => {
+  let best: DayValue | null = null;
   buckets.forEach((bucket) => {
     const value = accessor(bucket);
     if (!Number.isFinite(value)) return;
@@ -583,9 +683,9 @@ const findPeak = (buckets: DailyBucket[], accessor: (bucket: DailyBucket) => num
   return best;
 };
 
-const findChangeExtremes = (series: { label: string; value: number }[]) => {
-  let increase: { day: string; value: number } | null = null;
-  let decrease: { day: string; value: number } | null = null;
+const findChangeExtremes = (series: { label: string; value: number }[]): { increase: DayValue | null; decrease: DayValue | null } => {
+  let increase: DayValue | null = null;
+  let decrease: DayValue | null = null;
   for (let i = 1; i < series.length; i += 1) {
     const delta = series[i].value - series[i - 1].value;
     if (!increase || delta > increase.value) increase = { day: series[i].label, value: delta };
@@ -1655,6 +1755,26 @@ export default function Dashboard() {
   const loginSuccessEvents = useMemo(() => loginEvents.filter(isLoginSuccess), [loginEvents]);
   const loginUsers = distinctCount(loginSuccessEvents, 'user_id');
 
+  // Auth & Conversion stats
+  const authStats = useMemo(() => computeAuthStats(events), [events]);
+  const conversionStats = useMemo(() => computeConversionStats(events), [events]);
+
+  // Auth events for bar lists
+  const authLoginEvents = useMemo(() => events.filter(isAuthLoginEvent), [events]);
+  const authLoginSuccessEvents = useMemo(() => authLoginEvents.filter((e) => e.success === true), [authLoginEvents]);
+  const authLoginErrorEvents = useMemo(() => authLoginEvents.filter((e) => e.success === false), [authLoginEvents]);
+
+  // Auth methods distribution
+  const authLoginByMethod = useMemo(() => extractTopProperty(authLoginSuccessEvents, 'method', 5), [authLoginSuccessEvents]);
+  const authLoginErrors = useMemo(() => extractTopProperty(authLoginErrorEvents, 'error', 5), [authLoginErrorEvents]);
+
+  // Conversion events for bar lists
+  const checkoutCompleteEvents = useMemo(() => events.filter(isCheckoutCompleteEvent), [events]);
+  const subscriptionCancelEvents = useMemo(() => events.filter(isSubscriptionCancelEvent), [events]);
+  const checkoutsByPlan = useMemo(() => buildBarList(checkoutCompleteEvents, 'plan', 5), [checkoutCompleteEvents]);
+  const checkoutsByBillingPeriod = useMemo(() => buildBarList(checkoutCompleteEvents, 'billing_period', 5), [checkoutCompleteEvents]);
+  const cancelReasons = useMemo(() => extractTopProperty(subscriptionCancelEvents, 'cancel_reason', 5), [subscriptionCancelEvents]);
+
   const sessionStats = computeSessionStats(events);
   const totalSessions = sessionStats.sessionCount;
   const sessionsPerUser = safeDivide(totalSessions, totalUsers);
@@ -2053,7 +2173,7 @@ export default function Dashboard() {
                       <button
                         className="button button-ghost button-small"
                         type="button"
-                        onClick={() => zoomToDay(item.day)}
+                        onClick={() => zoomToDay(item.day!)}
                       >
                         Zoom day
                       </button>
@@ -2483,6 +2603,77 @@ export default function Dashboard() {
             activeValue={filters.billingPeriod}
             filterLabel="billing period"
           />
+        </div>
+
+        <div style={{ marginTop: '28px' }}>
+          <div className="section-title">Auth analytics</div>
+          <div className="section-subtitle">Login, signup, and password reset metrics</div>
+        </div>
+        <div className="kpi-row" style={{ marginTop: '12px' }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Logins (success)</div>
+            <div className="kpi-value">{formatNumber(authStats.loginSuccess)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Login success rate</div>
+            <div className="kpi-value">{formatPercent(authStats.loginSuccessRate)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Signups (success)</div>
+            <div className="kpi-value">{formatNumber(authStats.signupSuccess)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Signup success rate</div>
+            <div className="kpi-value">{formatPercent(authStats.signupSuccessRate)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Logouts</div>
+            <div className="kpi-value">{formatNumber(authStats.logoutTotal)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Password resets</div>
+            <div className="kpi-value">{formatNumber(authStats.passwordResetCompleteTotal)}</div>
+          </div>
+        </div>
+        <div className="section-grid" style={{ marginTop: '12px' }}>
+          <BarList title="Login by method" data={authLoginByMethod} />
+          <BarList title="Login errors" data={authLoginErrors} />
+        </div>
+
+        <div style={{ marginTop: '28px' }}>
+          <div className="section-title">Conversion funnel</div>
+          <div className="section-subtitle">Checkout, subscription, and payment metrics</div>
+        </div>
+        <div className="kpi-row" style={{ marginTop: '12px' }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Checkout started</div>
+            <div className="kpi-value">{formatNumber(conversionStats.checkoutStartTotal)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Checkout completed</div>
+            <div className="kpi-value">{formatNumber(conversionStats.checkoutCompleteTotal)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Checkout conversion</div>
+            <div className="kpi-value">{formatPercent(conversionStats.checkoutConversionRate)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">New subscriptions</div>
+            <div className="kpi-value">{formatNumber(conversionStats.subscriptionStartTotal)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Cancellations</div>
+            <div className="kpi-value">{formatNumber(conversionStats.subscriptionCancelTotal)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Payment success rate</div>
+            <div className="kpi-value">{formatPercent(conversionStats.paymentSuccessRate)}</div>
+          </div>
+        </div>
+        <div className="section-grid" style={{ marginTop: '12px' }}>
+          <BarList title="Checkouts by plan" data={checkoutsByPlan} />
+          <BarList title="Checkouts by billing" data={checkoutsByBillingPeriod} />
+          <BarList title="Cancel reasons" data={cancelReasons} />
         </div>
 
         <div style={{ marginTop: '28px' }}>

@@ -34,12 +34,15 @@ Required in every event:
 
 | event_name | feature | action | properties (required) | properties (optional) | notes |
 | --- | --- | --- | --- | --- | --- |
-| login | auth | start | method |  |  |
-| login | auth | success | method |  |  |
-| login | auth | error | method, error_code | error |  |
-| signup_complete | auth | success | method | invite_code |  |
-| password_reset | auth | start |  |  |  |
-| password_reset | auth | success |  |  |  |
+| auth_login | auth | success | method | duration_ms | triggered after successful login |
+| auth_login | auth | error | method | duration_ms, error | triggered after failed login |
+| auth_signup_complete | auth | success | method | duration_ms, has_referral | triggered after successful signup |
+| auth_signup_complete | auth | error | method | duration_ms, error | triggered after failed signup |
+| auth_logout | auth | success |  |  | triggered when user signs out |
+| auth_password_reset_request | auth | success |  | duration_ms | triggered when password reset email is sent |
+| auth_password_reset_request | auth | error |  | duration_ms, error | triggered when password reset fails |
+| auth_password_reset_complete | auth | success |  | duration_ms | triggered after password is updated |
+| auth_password_reset_complete | auth | error |  | duration_ms, error | triggered when password update fails |
 | profile_update | auth | success | field_count | fields |  |
 
 ## Billing + access
@@ -48,10 +51,13 @@ Required in every event:
 | --- | --- | --- | --- | --- | --- |
 | paywall_block | access | success | required_plan | reason |  |
 | plan_view | billing | success | plan |  |  |
-| checkout_start | billing | start | plan | coupon |  |
-| checkout_complete | billing | success | plan | coupon, price_id |  |
-| subscription_cancel | billing | success | plan | reason |  |
+| checkout_start | billing | start | plan, billing_period | coupon | triggered before Stripe checkout |
+| checkout_complete | billing | success | plan, billing_period | stripe_session_id, stripe_customer_id, amount_total, currency, payment_status, mode | triggered via Stripe webhook |
+| subscription_start | billing | success | plan, billing_period | stripe_subscription_id, stripe_customer_id, status | triggered when new subscription is created |
+| subscription_cancel | billing | success | plan, billing_period | stripe_subscription_id, stripe_customer_id, cancel_reason | triggered when subscription is deleted |
 | subscription_change | billing | success | from_plan, to_plan |  |  |
+| payment_succeeded | billing | success | plan, billing_period | stripe_invoice_id, stripe_customer_id, amount, currency | triggered after successful invoice payment |
+| payment_failed | billing | error |  | stripe_invoice_id, stripe_customer_id, amount, currency, error_code | triggered after failed invoice payment |
 
 ## Research + content
 
