@@ -930,3 +930,379 @@ button, input, select {
     align-items: flex-start;
   }
 }
+
+/* ============================================================================
+   Navigation Tabs
+   ============================================================================ */
+
+.nav-tabs {
+  display: flex;
+  gap: 4px;
+  background: rgba(16, 47, 51, 0.6);
+  border-radius: 999px;
+  padding: 4px;
+  border: 1px solid rgba(93, 183, 165, 0.2);
+}
+
+.nav-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-tab:hover {
+  color: var(--text);
+  background: rgba(93, 183, 165, 0.1);
+}
+
+.nav-tab.active {
+  background: var(--accent);
+  color: #20160f;
+  box-shadow: 0 4px 12px rgba(244, 162, 89, 0.3);
+}
+
+/* ============================================================================
+   Terminal Dashboard
+   ============================================================================ */
+
+.terminal-dashboard {
+  position: relative;
+  z-index: 1;
+  padding: 32px;
+  max-width: 1760px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.dashboard-header h1 {
+  font-family: var(--font-display);
+  font-size: 32px;
+  margin: 0;
+}
+
+.refresh-btn {
+  background: var(--accent);
+  color: #20160f;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refresh-btn:hover {
+  background: #f7b273;
+  transform: translateY(-1px);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Filters Section */
+.filters-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-bottom: 32px;
+  padding: 20px;
+  background: rgba(16, 47, 51, 0.8);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(93, 183, 165, 0.2);
+}
+
+.date-range-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.preset-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.preset-btn {
+  background: rgba(93, 183, 165, 0.12);
+  border: 1px solid rgba(93, 183, 165, 0.3);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preset-btn:hover {
+  border-color: var(--accent-2);
+  background: rgba(93, 183, 165, 0.2);
+}
+
+.date-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-input {
+  background: rgba(15, 38, 41, 0.9);
+  border: 1px solid rgba(93, 183, 165, 0.3);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+}
+
+.filter-select {
+  background: rgba(15, 38, 41, 0.9);
+  border: 1px solid rgba(93, 183, 165, 0.3);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  min-width: 120px;
+  cursor: pointer;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Status Banners */
+.error-banner {
+  background: rgba(242, 143, 121, 0.15);
+  border: 1px solid rgba(242, 143, 121, 0.4);
+  color: var(--accent-3);
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 24px;
+}
+
+.warning-banner {
+  background: rgba(244, 162, 89, 0.15);
+  border: 1px solid rgba(244, 162, 89, 0.4);
+  color: var(--accent);
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 24px;
+}
+
+/* Sections */
+.section {
+  margin-bottom: 40px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  margin: 0 0 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(93, 183, 165, 0.2);
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: rgba(19, 56, 60, 0.85);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  border: 1px solid rgba(93, 183, 165, 0.2);
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25);
+}
+
+.stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.stat-subtitle {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Charts Grid */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 24px;
+}
+
+.chart-card {
+  background: rgba(16, 47, 51, 0.82);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(93, 183, 165, 0.2);
+  padding: 24px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+}
+
+.chart-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.26em;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+/* Bar Chart */
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 50px;
+  gap: 12px;
+  align-items: center;
+}
+
+.bar-label {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-track {
+  height: 24px;
+  background: rgba(93, 183, 165, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.bar-value {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+/* Line Chart */
+.line-chart {
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+.line-chart svg {
+  flex: 1;
+  width: 100%;
+}
+
+.line-chart-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+/* Empty State */
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .terminal-dashboard {
+    padding: 16px;
+  }
+
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .filters-section {
+    flex-direction: column;
+  }
+
+  .filter-controls {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bar-row {
+    grid-template-columns: 80px 1fr 40px;
+  }
+
+  .nav-tabs {
+    width: 100%;
+    justify-content: center;
+  }
+}

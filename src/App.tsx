@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import Dashboard from './components/Dashboard';
+import TerminalDashboard from './components/TerminalDashboard';
 import { getSupabaseClient, hasSupabaseConfig } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
+
+type DashboardView = 'usage' | 'terminal';
 
 const AuthView = ({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) => {
   const [email, setEmail] = useState('');
@@ -62,6 +65,7 @@ const AuthView = ({ onSignIn }: { onSignIn: (email: string, password: string) =>
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<DashboardView>('usage');
 
   useEffect(() => {
     const client = getSupabaseClient();
@@ -136,6 +140,20 @@ export default function App() {
                 <div className="brand-subtitle">Usage intelligence</div>
               </div>
             </div>
+            <div className="nav-tabs">
+              <button
+                className={`nav-tab ${activeView === 'usage' ? 'active' : ''}`}
+                onClick={() => setActiveView('usage')}
+              >
+                Usage Events
+              </button>
+              <button
+                className={`nav-tab ${activeView === 'terminal' ? 'active' : ''}`}
+                onClick={() => setActiveView('terminal')}
+              >
+                Terminal
+              </button>
+            </div>
             <div className="header-actions">
               <span className="badge">{session.user.email || 'signed-in'}</span>
               <button className="button" onClick={handleSignOut}>
@@ -145,7 +163,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      <Dashboard />
+      {activeView === 'usage' ? <Dashboard /> : <TerminalDashboard />}
     </div>
   );
 }

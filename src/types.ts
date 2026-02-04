@@ -69,3 +69,60 @@ export type DailyDatum = {
   sessions: number;
   events: number;
 };
+
+// ============================================================================
+// Terminal Events Types
+// ============================================================================
+
+export type TerminalEvent = {
+  id: string;
+  event_ts: string;
+  event_name: string;
+  feature: string | null;
+  action: string | null;
+  success: boolean | null;
+  user_id: string | null;
+  session_id: string | null;
+  ticker: string | null;
+  response_mode: string | null;
+  duration_ms: number | null;
+  token_count: number | null;
+  phase: string | null;
+  error_message: string | null;
+  properties: Record<string, unknown> | null;
+  device_type: string | null;
+  browser: string | null;
+  os: string | null;
+};
+
+export type TerminalFilters = {
+  ticker: string;
+  responseMode: string;
+  eventName: string;
+  phase: string;
+  deviceType: string;
+  browser: string;
+  os: string;
+};
+
+export type TerminalDailyDatum = {
+  day: string;
+  messages: number;
+  users: number;
+  sessions: number;
+};
+
+export type TerminalStats = {
+  totalMessages: number;
+  uniqueUsers: number;
+  uniqueTickers: number;
+  uniqueSessions: number;
+  avgDurationMs: number;
+  successRate: number;
+};
+
+export type AgentPhaseStats = {
+  planning: { avg: number; count: number };
+  execution: { avg: number; count: number };
+  answering: { avg: number; count: number };
+};
